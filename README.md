@@ -1,6 +1,6 @@
 # ivsc-driver
 
-This repository supports Intel Vision Sensing Controller(IVSC) on Intel Alder Lake platforms.
+This repository supports USBIO Extension drivers on Intel Alder Lake platforms.
 
 
 ## Build instructions:
@@ -84,45 +84,12 @@ config I2C_LJCA
 obj-$(CONFIG_I2C_LJCA) += i2c-ljca.o
 ```
 
-* Add to drivers/misc/mei/Kconfig
-```
-config INTEL_MEI_VSC
-        tristate "Intel Vision Sensing Controller device with ME interface"
-        select INTEL_MEI
-        depends on X86 && SPI
-        help
-         MEI over SPI for Intel Vision Sensing Controller device
-```
-* Add to drivers/misc/mei/Makefile
-```
-obj-$(CONFIG_INTEL_MEI_VSC) += mei-vsc.o
-mei-vsc-objs := spi-vsc.o
-mei-vsc-objs += hw-vsc.o
-```
-
-* Add to drivers/misc/Kconfig
-```
-source "drivers/misc/ivsc/Kconfig"
-```
-* Add to drivers/misc/Makefile
-```
-obj-$(CONFIG_INTEL_VSC) += ivsc/
-```
-
 * Enable the following settings in .config
 ```
 CONFIG_MFD_LJCA=m
 CONFIG_I2C_LJCA=m
 CONFIG_SPI_LJCA=m
 CONFIG_GPIO_LJCA=m
-
-CONFIG_INTEL_MEI_VSC=m
-
-CONFIG_INTEL_VSC=m
-CONFIG_INTEL_VSC_CSI=m
-CONFIG_INTEL_VSC_ACE=m
-CONFIG_INTEL_VSC_PSE=m
-CONFIG_INTEL_VSC_ACE_DEBUG=m
 ```
 
 ### build out of kernel source tree
@@ -130,7 +97,7 @@ CONFIG_INTEL_VSC_ACE_DEBUG=m
 
 * To compile:
 ```
-$cd ivsc-driver
+$cd linux-usbio
 $make -j`nproc`
 ```
 
@@ -146,18 +113,4 @@ used by ```dkms``` ```add```, ```build``` and ```install```.
 
 
 ## Deployment:
-ivsc firmware bins should be copied to /lib/firmware/vsc.
-
-And on debugging platform the binaries(e.g. ov01a10 sensor) will be put as below:
-```
-/lib/firmware/vsc/soc_a1/ivsc_fw_a1.bin
-/lib/firmware/vsc/soc_a1/ivsc_pkg_ovti01a0_0_a1.bin
-/lib/firmware/vsc/soc_a1/ivsc_skucfg_ovti01a0_0_1_a1.bin
-```
-
-And on production platform the binaries(e.g. ov01a10 sensor) will be put as below:
-```
-/lib/firmware/vsc/soc_a1_prod/ivsc_fw_a1_prod.bin
-/lib/firmware/vsc/soc_a1_prod/ivsc_pkg_ovti01a0_0_a1_prod.bin
-/lib/firmware/vsc/soc_a1_prod/ivsc_skucfg_ovti01a0_0_1_a1_prod.bin
-```
+TBD
