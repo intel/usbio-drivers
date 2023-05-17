@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-only
+
 /*
- * Intel La Jolla Cove Adapter USB-SPI driver
+ * Intel USBIO-SPI driver
  *
- * Copyright (c) 2021, Intel Corporation.
+ * Copyright (c) 2023, Intel Corporation.
  */
 
 #include <linux/acpi.h>
-#include <linux/mfd/ljca.h>
+#include <linux/mfd/usbio.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/spi/spi.h>
 
 /* SPI commands */
-enum ljca_spi_cmd {
+enum usbio_spi_cmd {
 	LJCA_SPI_INIT = 1,
 	LJCA_SPI_READ,
 	LJCA_SPI_WRITE,
@@ -71,9 +72,9 @@ struct spi_xfer_packet {
 	u8 data[];
 } __packed;
 
-struct ljca_spi_dev {
+struct usbio_spi_dev {
 	struct platform_device *pdev;
-	struct ljca_spi_info *ctr_info;
+	struct usbio_spi_info *ctr_info;
 	struct spi_master *master;
 	u8 speed;
 	u8 mode;
@@ -82,18 +83,18 @@ struct ljca_spi_dev {
 	u8 ibuf[LJCA_SPI_BUF_SIZE];
 };
 
-static int ljca_spi_read_write(struct ljca_spi_dev *ljca_spi, const u8 *w_data,
+static int usbio_spi_read_write(struct usbio_spi_dev *usbio_spi, const u8 *w_data,
 			       u8 *r_data, int len, int id, int complete,
 			       int cmd)
 {
 	struct spi_xfer_packet *w_packet =
-		(struct spi_xfer_packet *)ljca_spi->obuf;
+		(struct spi_xfer_packet *)usbio_spi->obuf;
 	struct spi_xfer_packet *r_packet =
-		(struct spi_xfer_packet *)ljca_spi->ibuf;
+		(struct spi_xfer_packet *)usbio_spi->ibuf;
 	int ret;
 	int ibuf_len;
 
-	w_packet->indicator.index = ljca_spi->ctr_info->id;
+	w_packet->indicator.index = usbio_spi->ctr_info->id;
 	w_packet->indicator.id = id;
 	w_packet->indicator.cmpl = complete;
 
@@ -105,14 +106,14 @@ static int ljca_spi_read_write(struct ljca_spi_dev *ljca_spi, const u8 *w_data,
 		memcpy(w_packet->data, w_data, len);
 	}
 
-	ret = ljca_transfer(ljca_spi->pdev, cmd, w_packet,
+	ret = usbio_transfer(usbio_spi->pdev, cmd, w_packet,
 			    sizeof(*w_packet) + w_packet->len, r_packet,
 			    &ibuf_len);
 	if (ret)
 		return ret;
 
 	if (ibuf_len < sizeof(*r_packet) || r_packet->len <= 0) {
-		dev_err(&ljca_spi->pdev->dev, "receive patcket error len %d\n",
+		dev_err(&usbio_spi->pdev->dev, "receive patcket error len %d\n",
 			r_packet->len);
 		return -EIO;
 	}
@@ -123,12 +124,12 @@ static int ljca_spi_read_write(struct ljca_spi_dev *ljca_spi, const u8 *w_data,
 	return 0;
 }
 
-static int ljca_spi_init(struct ljca_spi_dev *ljca_spi, int div, int mode)
+static int usbio_spi_init(struct usbio_spi_dev *usbio_spi, int div, int mode)
 {
 	struct spi_init_packet w_packet = { 0 };
 	int ret;
 
-	if (ljca_spi->mode == mode && ljca_spi->speed == div)
+	if (usbio_spi->mode == mode && usbio_spi->speed == div)
 		return 0;
 
 	if (mode & SPI_CPOL)
@@ -141,28 +142,28 @@ static int ljca_spi_init(struct ljca_spi_dev *ljca_spi, int div, int mode)
 	else
 		w_packet.mode.u.phrase = LJCA_SPI_CLOCK_FIRST_PHASE;
 
-	w_packet.index = ljca_spi->ctr_info->id;
+	w_packet.index = usbio_spi->ctr_info->id;
 	w_packet.speed = div;
-	ret = ljca_transfer(ljca_spi->pdev, LJCA_SPI_INIT, &w_packet,
+	ret = usbio_transfer(usbio_spi->pdev, LJCA_SPI_INIT, &w_packet,
 			    sizeof(w_packet), NULL, NULL);
 	if (ret)
 		return ret;
 
-	ljca_spi->mode = mode;
-	ljca_spi->speed = div;
+	usbio_spi->mode = mode;
+	usbio_spi->speed = div;
 	return 0;
 }
 
-static int ljca_spi_deinit(struct ljca_spi_dev *ljca_spi)
+static int usbio_spi_deinit(struct usbio_spi_dev *usbio_spi)
 {
 	struct spi_init_packet w_packet = { 0 };
 
-	w_packet.index = ljca_spi->ctr_info->id;
-	return ljca_transfer(ljca_spi->pdev, LJCA_SPI_DEINIT, &w_packet,
+	w_packet.index = usbio_spi->ctr_info->id;
+	return usbio_transfer(usbio_spi->pdev, LJCA_SPI_DEINIT, &w_packet,
 			     sizeof(w_packet), NULL, NULL);
 }
 
-static int ljca_spi_transfer(struct ljca_spi_dev *ljca_spi, const u8 *tx_data,
+static int usbio_spi_transfer(struct usbio_spi_dev *usbio_spi, const u8 *tx_data,
 			     u8 *rx_data, u16 len)
 {
 	int ret;
@@ -174,7 +175,7 @@ static int ljca_spi_transfer(struct ljca_spi_dev *ljca_spi, const u8 *tx_data,
 
 	for (i = 0; remaining > 0;
 	     offset += cur_len, remaining -= cur_len, i++) {
-		dev_dbg(&ljca_spi->pdev->dev,
+		dev_dbg(&usbio_spi->pdev->dev,
 			"fragment %d offset %d remaining %d ret %d\n", i,
 			offset, remaining, ret);
 
@@ -186,15 +187,15 @@ static int ljca_spi_transfer(struct ljca_spi_dev *ljca_spi, const u8 *tx_data,
 		}
 
 		if (tx_data && rx_data)
-			ret = ljca_spi_read_write(ljca_spi, tx_data + offset,
+			ret = usbio_spi_read_write(usbio_spi, tx_data + offset,
 						  rx_data + offset, cur_len, i,
 						  complete, LJCA_SPI_WRITEREAD);
 		else if (tx_data)
-			ret = ljca_spi_read_write(ljca_spi, tx_data + offset,
+			ret = usbio_spi_read_write(usbio_spi, tx_data + offset,
 						  NULL, cur_len, i, complete,
 						  LJCA_SPI_WRITE);
 		else if (rx_data)
-			ret = ljca_spi_read_write(ljca_spi, NULL,
+			ret = usbio_spi_read_write(usbio_spi, NULL,
 						  rx_data + offset, cur_len, i,
 						  complete, LJCA_SPI_READ);
 		else
@@ -207,21 +208,21 @@ static int ljca_spi_transfer(struct ljca_spi_dev *ljca_spi, const u8 *tx_data,
 	return 0;
 }
 
-static int ljca_spi_prepare_message(struct spi_master *master,
+static int usbio_spi_prepare_message(struct spi_master *master,
 				    struct spi_message *message)
 {
-	struct ljca_spi_dev *ljca_spi = spi_master_get_devdata(master);
+	struct usbio_spi_dev *usbio_spi = spi_master_get_devdata(master);
 	struct spi_device *spi = message->spi;
 
-	dev_dbg(&ljca_spi->pdev->dev, "cs %d\n", spi->chip_select);
+	dev_dbg(&usbio_spi->pdev->dev, "cs %d\n", spi->chip_select);
 	return 0;
 }
 
-static int ljca_spi_transfer_one(struct spi_master *master,
+static int usbio_spi_transfer_one(struct spi_master *master,
 				 struct spi_device *spi,
 				 struct spi_transfer *xfer)
 {
-	struct ljca_spi_dev *ljca_spi = spi_master_get_devdata(master);
+	struct usbio_spi_dev *usbio_spi = spi_master_get_devdata(master);
 	int ret;
 	int div;
 
@@ -229,46 +230,46 @@ static int ljca_spi_transfer_one(struct spi_master *master,
 	if (div > LJCA_SPI_BUS_SPEED_MIN)
 		div = LJCA_SPI_BUS_SPEED_MIN;
 
-	ret = ljca_spi_init(ljca_spi, div, spi->mode);
+	ret = usbio_spi_init(usbio_spi, div, spi->mode);
 	if (ret < 0) {
-		dev_err(&ljca_spi->pdev->dev,
+		dev_err(&usbio_spi->pdev->dev,
 			"cannot initialize transfer ret %d\n", ret);
 		return ret;
 	}
 
-	ret = ljca_spi_transfer(ljca_spi, xfer->tx_buf, xfer->rx_buf,
+	ret = usbio_spi_transfer(usbio_spi, xfer->tx_buf, xfer->rx_buf,
 				xfer->len);
 	if (ret < 0)
-		dev_err(&ljca_spi->pdev->dev, "ljca spi transfer failed!\n");
+		dev_err(&usbio_spi->pdev->dev, "ljca spi transfer failed!\n");
 
 	return ret;
 }
 
-static int ljca_spi_probe(struct platform_device *pdev)
+static int usbio_spi_probe(struct platform_device *pdev)
 {
 	struct spi_master *master;
-	struct ljca_spi_dev *ljca_spi;
-	struct ljca_platform_data *pdata = dev_get_platdata(&pdev->dev);
+	struct usbio_spi_dev *usbio_spi;
+	struct usbio_platform_data *pdata = dev_get_platdata(&pdev->dev);
 	int ret;
 
-	master = spi_alloc_master(&pdev->dev, sizeof(*ljca_spi));
+	master = spi_alloc_master(&pdev->dev, sizeof(*usbio_spi));
 	if (!master)
 		return -ENOMEM;
 
 	platform_set_drvdata(pdev, master);
-	ljca_spi = spi_master_get_devdata(master);
+	usbio_spi = spi_master_get_devdata(master);
 
-	ljca_spi->ctr_info = &pdata->spi_info;
-	ljca_spi->master = master;
-	ljca_spi->master->dev.of_node = pdev->dev.of_node;
-	ljca_spi->pdev = pdev;
+	usbio_spi->ctr_info = &pdata->spi_info;
+	usbio_spi->master = master;
+	usbio_spi->master->dev.of_node = pdev->dev.of_node;
+	usbio_spi->pdev = pdev;
 
-	ACPI_COMPANION_SET(&ljca_spi->master->dev, ACPI_COMPANION(&pdev->dev));
+	ACPI_COMPANION_SET(&usbio_spi->master->dev, ACPI_COMPANION(&pdev->dev));
 
 	master->bus_num = -1;
 	master->mode_bits = SPI_CPHA | SPI_CPOL;
-	master->prepare_message = ljca_spi_prepare_message;
-	master->transfer_one = ljca_spi_transfer_one;
+	master->prepare_message = usbio_spi_prepare_message;
+	master->transfer_one = usbio_spi_transfer_one;
 	master->auto_runtime_pm = false;
 	master->max_speed_hz = LJCA_SPI_BUS_MAX_HZ;
 
@@ -285,24 +286,24 @@ exit_free_master:
 	return ret;
 }
 
-static int ljca_spi_dev_remove(struct platform_device *pdev)
+static int usbio_spi_dev_remove(struct platform_device *pdev)
 {
 	struct spi_master *master = spi_master_get(platform_get_drvdata(pdev));
-	struct ljca_spi_dev *ljca_spi = spi_master_get_devdata(master);
+	struct usbio_spi_dev *usbio_spi = spi_master_get_devdata(master);
 
-	ljca_spi_deinit(ljca_spi);
+	usbio_spi_deinit(usbio_spi);
 	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
-static int ljca_spi_dev_suspend(struct device *dev)
+static int usbio_spi_dev_suspend(struct device *dev)
 {
 	struct spi_master *master = dev_get_drvdata(dev);
 
 	return spi_master_suspend(master);
 }
 
-static int ljca_spi_dev_resume(struct device *dev)
+static int usbio_spi_dev_resume(struct device *dev)
 {
 	struct spi_master *master = dev_get_drvdata(dev);
 
@@ -310,22 +311,22 @@ static int ljca_spi_dev_resume(struct device *dev)
 }
 #endif /* CONFIG_PM_SLEEP */
 
-static const struct dev_pm_ops ljca_spi_pm = {
-	SET_SYSTEM_SLEEP_PM_OPS(ljca_spi_dev_suspend, ljca_spi_dev_resume)
+static const struct dev_pm_ops usbio_spi_pm = {
+	SET_SYSTEM_SLEEP_PM_OPS(usbio_spi_dev_suspend, usbio_spi_dev_resume)
 };
 
-static struct platform_driver spi_ljca_driver = {
+static struct platform_driver spi_usbio_driver = {
 	.driver = {
-		.name	= "ljca-spi",
-		.pm	= &ljca_spi_pm,
+		.name	= "usb-spi",
+		.pm	= &usbio_spi_pm,
 	},
-	.probe		= ljca_spi_probe,
-	.remove		= ljca_spi_dev_remove,
+	.probe		= usbio_spi_probe,
+	.remove		= usbio_spi_dev_remove,
 };
 
-module_platform_driver(spi_ljca_driver);
+module_platform_driver(spi_usbio_driver);
 
 MODULE_AUTHOR("Ye Xiang <xiang.ye@intel.com>");
 MODULE_DESCRIPTION("Intel La Jolla Cove Adapter USB-SPI driver");
 MODULE_LICENSE("GPL v2");
-MODULE_ALIAS("platform:ljca-spi");
+MODULE_ALIAS("platform:usb-spi");

@@ -1,4 +1,4 @@
-# ivsc-driver
+# usbio driver stack
 
 This repository supports USBIO Extension drivers on Intel Alder Lake platforms.
 
@@ -10,7 +10,7 @@ Three ways are available:
   3. build with dkms
 
 ### build with kernel source tree
-* Tested with kernel 5.12-rc4 and 5.13-rc5
+* Tested with kernel 5.19
 * Check out kernel
 * Copy repo content to kernel source
 * Modify related Kconfig and Makefile
