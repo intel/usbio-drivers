@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (c) 2022 Intel Corporation.
 
-obj-m += ljca.o
-ljca-y := drivers/mfd/ljca.o
+obj-m += usbio.o
+usbio-y := drivers/mfd/usbio.o
 
 obj-m += spi-ljca.o
 spi-ljca-y := drivers/spi/spi-ljca.o
