@@ -17,19 +17,19 @@ Three ways are available:
 
 * Add to drivers/mfd/Kconfig
 ```
-config MFD_LJCA
-        tristate "Intel La Jolla Cove Adapter support"
+config MFD_USBIO
+        tristate "Intel USBIO extension support"
         select MFD_CORE
         depends on USB
         help
-          This adds support for Intel La Jolla Cove USB-I2C/SPI/GPIO
-          Adapter (LJCA). Additional drivers such as I2C_LJCA,
+          This adds support for Intel USBIO (I2C/SPI/GPIO)
+          Extension. Additional drivers such as GPIO_USBIO,
           GPIO_LJCA, etc. must be enabled in order to use the
           functionality of the device.
 ```
 * add to drivers/mfd/Makefile
 ```
-obj-$(CONFIG_MFD_LJCA) += ljca.o
+obj-$(CONFIG_MFD_USBIO) += usbio.o
 ```
 
 * Add to drivers/spi/Kconfig
@@ -51,20 +51,20 @@ obj-$(CONFIG_SPI_LJCA) += spi-ljca.o
 
 * Add to drivers/gpio/Kconfig
 ```
-config GPIO_LJCA
-        tristate "INTEL La Jolla Cove Adapter GPIO support"
-        depends on MFD_LJCA
+config GPIO_USBIO
+        tristate "INTEL USBIO GPIO Extension support"
+        depends on MFD_USBIO
 
         help
           Select this option to enable GPIO driver for the INTEL
-          La Jolla Cove Adapter (LJCA) board.
+          USBIO Extension
 
           This driver can also be built as a module. If so, the module
-          will be called gpio-ljca.
+          will be called gpio-usbio.
 ```
 * Add to drivers/gpio/Makefile
 ```
-obj-$(CONFIG_GPIO_LJCA) += gpio-ljca.o
+obj-$(CONFIG_GPIO_USBIO) += gpio-usbio.o
 ```
 
 * Add to drivers/i2c/busses/Kconfig
@@ -86,10 +86,10 @@ obj-$(CONFIG_I2C_LJCA) += i2c-ljca.o
 
 * Enable the following settings in .config
 ```
-CONFIG_MFD_LJCA=m
+CONFIG_MFD_USBIO=m
+CONFIG_GPIO_USBIO=m
 CONFIG_I2C_LJCA=m
 CONFIG_SPI_LJCA=m
-CONFIG_GPIO_LJCA=m
 ```
 
 ### build out of kernel source tree

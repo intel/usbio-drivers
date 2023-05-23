@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: GPL-2.0
-# Copyright (c) 2022 Intel Corporation.
+# Copyright (c) 2023 Intel Corporation.
 
 obj-m += usbio.o
 usbio-y := drivers/mfd/usbio.o
 
-obj-m += spi-ljca.o
-spi-ljca-y := drivers/spi/spi-ljca.o
-
-obj-m += gpio-ljca.o
-gpio-ljca-y := drivers/gpio/gpio-ljca.o
+obj-m += gpio-usbio.o
+gpio-usbio-y := drivers/gpio/gpio-usbio.o
 
 obj-m += i2c-ljca.o
 i2c-ljca-y := drivers/i2c/busses/i2c-ljca.o
+
+obj-m += spi-ljca.o
+spi-ljca-y := drivers/spi/spi-ljca.o
 
 KERNELRELEASE ?= $(shell uname -r)
 KERNEL_SRC ?= /lib/modules/$(KERNELRELEASE)/build

@@ -18,41 +18,51 @@
 #include <linux/types.h>
 #include <linux/bitops.h>
 
-#define GPIO_PAYLOAD_LEN(pin_num)                                              \
-	(sizeof(struct gpio_packet) + (pin_num) * sizeof(struct gpio_op))
+#define GPIO_PAYLOAD_LEN(packet, pin)	(sizeof(*packet) + (pin))
 
 /* GPIO commands */
-#define GPIO_CONFIG 1
+#define GPIO_DEINIT 0
+#define GPIO_INIT 1
 #define GPIO_READ 2
 #define GPIO_WRITE 3
+
+/* Deprecated */
 #define GPIO_INT_EVENT 4
 #define GPIO_INT_MASK 5
 #define GPIO_INT_UNMASK 6
 
-#define GPIO_CONF_DISABLE BIT(0)
-#define GPIO_CONF_INPUT BIT(1)
-#define GPIO_CONF_OUTPUT BIT(2)
-#define GPIO_CONF_PULLUP BIT(3)
-#define GPIO_CONF_PULLDOWN BIT(4)
-#define GPIO_CONF_DEFAULT BIT(5)
+/* PinMode */
+#define GPIO_CONF_DISABLED	0
+#define GPIO_CONF_INPUT		1
+#define GPIO_CONF_OUTPUT	2
+
+/* PinConfig */
+#define GPIO_CONF_DEFAULT	(0<<2)
+#define GPIO_CONF_PULLUP	(1<<2)
+#define GPIO_CONF_PULLDOWN	(2<<2)
+#define GPIO_CONF_NONE		(3<<2)
+
+/* Deprecated */
 #define GPIO_CONF_INTERRUPT BIT(6)
 #define GPIO_INT_TYPE BIT(7)
 
 #define GPIO_CONF_EDGE (1 << 7)
 #define GPIO_CONF_LEVEL (0 << 7)
 
-/* Intentional overlap with PULLUP / PULLDOWN */
-#define GPIO_CONF_SET BIT(3)
-#define GPIO_CONF_CLR BIT(4)
+#define IRQ_SUPPORT 0
 
-struct gpio_op {
-	u8 index;
-	u8 value;
+struct gpio_cfg_packet {
+	u8 bankid;
+	u8 config;
+	u8 pincount;
+	u8 pins;
 } __packed;
 
-struct gpio_packet {
-	u8 num;
-	struct gpio_op item[];
+struct gpio_rw_packet {
+	u8 bankid;
+	u8 pincount;
+	u8 pins;
+	u32 value;
 } __packed;
 
 struct usbio_gpio_dev {
@@ -76,7 +86,7 @@ static bool usbio_gpio_valid(struct usbio_gpio_dev *usbio_gpio, int gpio_id)
 	if (gpio_id >= usbio_gpio->ctr_info->num ||
 	    !test_bit(gpio_id, usbio_gpio->ctr_info->valid_pin_map)) {
 		dev_err(&usbio_gpio->pdev->dev,
-			"invalid gpio gpio_id:%d\n", gpio_id);
+			"invalid gpio_id:%d\n", gpio_id);
 		return false;
 	}
 
@@ -85,27 +95,28 @@ static bool usbio_gpio_valid(struct usbio_gpio_dev *usbio_gpio, int gpio_id)
 
 static int gpio_config(struct usbio_gpio_dev *usbio_gpio, u8 gpio_id, u8 config)
 {
-	struct gpio_packet *packet = (struct gpio_packet *)usbio_gpio->obuf;
+	struct gpio_cfg_packet *packet = (struct gpio_cfg_packet *)usbio_gpio->obuf;
 	int ret;
 
 	if (!usbio_gpio_valid(usbio_gpio, gpio_id))
 		return -EINVAL;
 
 	mutex_lock(&usbio_gpio->trans_lock);
-	packet->item[0].index = gpio_id;
-	packet->item[0].value = config | usbio_gpio->connect_mode[gpio_id];
-	packet->num = 1;
+	packet->bankid = gpio_id / GPIO_PER_BANK;
+	packet->config = config | usbio_gpio->connect_mode[gpio_id];
+	packet->pincount = 1;
+	packet->pins = gpio_id % GPIO_PER_BANK;
 
-	ret = usbio_transfer(usbio_gpio->pdev, GPIO_CONFIG, packet,
-			    GPIO_PAYLOAD_LEN(packet->num), NULL, NULL);
+	ret = usbio_transfer(usbio_gpio->pdev, GPIO_INIT, packet,
+			    GPIO_PAYLOAD_LEN(packet, packet->pins), NULL, NULL);
 	mutex_unlock(&usbio_gpio->trans_lock);
 	return ret;
 }
 
 static int usbio_gpio_read(struct usbio_gpio_dev *usbio_gpio, u8 gpio_id)
 {
-	struct gpio_packet *packet = (struct gpio_packet *)usbio_gpio->obuf;
-	struct gpio_packet *ack_packet;
+	struct gpio_rw_packet *packet = (struct gpio_rw_packet *)usbio_gpio->obuf;
+	struct gpio_rw_packet *ack_packet;
 	int ret;
 	int ibuf_len;
 
@@ -113,37 +124,46 @@ static int usbio_gpio_read(struct usbio_gpio_dev *usbio_gpio, u8 gpio_id)
 		return -EINVAL;
 
 	mutex_lock(&usbio_gpio->trans_lock);
-	packet->num = 1;
-	packet->item[0].index = gpio_id;
+	packet->bankid = gpio_id / GPIO_PER_BANK;
+	packet->pincount = 1;
+	packet->pins = gpio_id % GPIO_PER_BANK;
 	ret = usbio_transfer(usbio_gpio->pdev, GPIO_READ, packet,
-			    GPIO_PAYLOAD_LEN(packet->num), usbio_gpio->ibuf,
-			    &ibuf_len);
+			    GPIO_PAYLOAD_LEN(packet, packet->pins),
+			    usbio_gpio->ibuf, &ibuf_len);
 
-	ack_packet = (struct gpio_packet *)usbio_gpio->ibuf;
-	if (ret || !ibuf_len || ack_packet->num != packet->num) {
+	ack_packet = (struct gpio_rw_packet *)usbio_gpio->ibuf;
+	if (ret || !ibuf_len || ack_packet->pins != packet->pins) {
 		dev_err(&usbio_gpio->pdev->dev, "%s failed gpio_id:%d ret %d %d",
-			__func__, gpio_id, ret, ack_packet->num);
+			__func__, gpio_id, ret, ack_packet->pins);
 		mutex_unlock(&usbio_gpio->trans_lock);
 		return -EIO;
 	}
 
 	mutex_unlock(&usbio_gpio->trans_lock);
-	return (ack_packet->item[0].value > 0) ? 1 : 0;
+	return (ack_packet->value & (1 << ack_packet->pins) ? 1 : 0);
 }
 
 static int usbio_gpio_write(struct usbio_gpio_dev *usbio_gpio, u8 gpio_id,
 			   int value)
 {
-	struct gpio_packet *packet = (struct gpio_packet *)usbio_gpio->obuf;
+	struct gpio_rw_packet *packet = (struct gpio_rw_packet *)usbio_gpio->obuf;
 	int ret;
 
 	mutex_lock(&usbio_gpio->trans_lock);
-	packet->num = 1;
-	packet->item[0].index = gpio_id;
-	packet->item[0].value = (value & 1);
+	packet->bankid = gpio_id / GPIO_PER_BANK;
+	packet->pincount = 1;
+	packet->pins = gpio_id % GPIO_PER_BANK;
+	packet->value = value << packet->pins;
 
 	ret = usbio_transfer(usbio_gpio->pdev, GPIO_WRITE, packet,
-			    GPIO_PAYLOAD_LEN(packet->num), NULL, NULL);
+			    GPIO_PAYLOAD_LEN(packet, packet->pins), NULL, NULL);
+	if (ret) {
+		dev_err(&usbio_gpio->pdev->dev, "%s failed gpio_id:%d ret %d\n",
+			__func__, gpio_id, ret);
+		mutex_unlock(&usbio_gpio->trans_lock);
+		return -EIO;
+	}
+
 	mutex_unlock(&usbio_gpio->trans_lock);
 	return ret;
 }
@@ -172,7 +192,7 @@ static int usbio_gpio_direction_input(struct gpio_chip *chip,
 				     unsigned int offset)
 {
 	struct usbio_gpio_dev *usbio_gpio = gpiochip_get_data(chip);
-	u8 config = GPIO_CONF_INPUT | GPIO_CONF_CLR;
+	u8 config = GPIO_CONF_INPUT;
 
 	return gpio_config(usbio_gpio, offset, config);
 }
@@ -181,7 +201,7 @@ static int usbio_gpio_direction_output(struct gpio_chip *chip,
 				      unsigned int offset, int val)
 {
 	struct usbio_gpio_dev *usbio_gpio = gpiochip_get_data(chip);
-	u8 config = GPIO_CONF_OUTPUT | GPIO_CONF_CLR;
+	u8 config = GPIO_CONF_OUTPUT;
 	int ret;
 
 	ret = gpio_config(usbio_gpio, offset, config);
@@ -210,14 +230,16 @@ static int usbio_gpio_set_config(struct gpio_chip *chip, unsigned int offset,
 		break;
 	case PIN_CONFIG_DRIVE_PUSH_PULL:
 	case PIN_CONFIG_PERSIST_STATE:
+		usbio_gpio->connect_mode[offset] |= GPIO_CONF_NONE;
 		break;
 	default:
-		return -ENOTSUPP;
+		usbio_gpio->connect_mode[offset] |= GPIO_CONF_DEFAULT;
+		break;
 	}
 
 	return 0;
 }
-
+#if IRQ_SUPPORT
 static int usbio_enable_irq(struct usbio_gpio_dev *usbio_gpio, int gpio_id,
 			   bool enable)
 {
@@ -233,7 +255,7 @@ static int usbio_enable_irq(struct usbio_gpio_dev *usbio_gpio, int gpio_id,
 
 	ret = usbio_transfer(usbio_gpio->pdev,
 			    enable == true ? GPIO_INT_UNMASK : GPIO_INT_MASK,
-			    packet, GPIO_PAYLOAD_LEN(packet->num), NULL, NULL);
+			    packet, GPIO_PAYLOAD_LEN(packet, packet->pins), NULL, NULL);
 	mutex_unlock(&usbio_gpio->trans_lock);
 	return ret;
 }
@@ -400,12 +422,14 @@ static struct irq_chip usbio_gpio_irqchip = {
 	.irq_startup = usbio_irq_startup,
 	.irq_shutdown = usbio_irq_shutdown,
 };
-
+#endif
 static int usbio_gpio_probe(struct platform_device *pdev)
 {
 	struct usbio_gpio_dev *usbio_gpio;
 	struct usbio_platform_data *pdata = dev_get_platdata(&pdev->dev);
-	struct gpio_irq_chip *girq;
+#if IRQ_SUPPORT
+	struct gpio_irq_chip *girq = NULL;
+#endif
 
 	usbio_gpio = devm_kzalloc(&pdev->dev, sizeof(*usbio_gpio), GFP_KERNEL);
 	if (!usbio_gpio)
@@ -433,10 +457,11 @@ static int usbio_gpio_probe(struct platform_device *pdev)
 	usbio_gpio->gc.ngpio = usbio_gpio->ctr_info->num;
 	usbio_gpio->gc.label = ACPI_COMPANION(&pdev->dev) ?
 			      acpi_dev_name(ACPI_COMPANION(&pdev->dev)) :
-			      "ljca-gpio";
+			      "usbio-gpio";
 	usbio_gpio->gc.owner = THIS_MODULE;
 
 	platform_set_drvdata(pdev, usbio_gpio);
+#if IRQ_SUPPORT
 	usbio_register_event_cb(pdev, usbio_gpio_event_cb);
 
 	girq = &usbio_gpio->gc.irq;
@@ -446,8 +471,8 @@ static int usbio_gpio_probe(struct platform_device *pdev)
 	girq->parents = NULL;
 	girq->default_type = IRQ_TYPE_NONE;
 	girq->handler = handle_simple_irq;
-
 	INIT_WORK(&usbio_gpio->work, usbio_gpio_async);
+#endif
 	return devm_gpiochip_add_data(&pdev->dev, &usbio_gpio->gc, usbio_gpio);
 }
 

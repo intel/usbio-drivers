@@ -107,7 +107,7 @@ static bool usbio_validate(void *data, u32 data_len)
 	return (header->len + sizeof(*header) == data_len);
 }
 
-void usbio_dump(struct usbio_dev *ljca, void *buf, int len)
+void usbio_dump(struct usbio_dev *bridge, void *buf, int len)
 {
 	int i;
 	u8 tmp[256] = { 0 };
@@ -120,10 +120,10 @@ void usbio_dump(struct usbio_dev *ljca, void *buf, int len)
 		n += scnprintf(tmp + n, sizeof(tmp) - n - 1, "%02x ",
 			       ((u8 *)buf)[i]);
 
-	dev_dbg(&ljca->intf->dev, "%s\n", tmp);
+	dev_dbg(&bridge->intf->dev, "%s\n", tmp);
 }
 
-static struct usbio_stub *usbio_stub_alloc(struct usbio_dev *ljca, int priv_size)
+static struct usbio_stub *usbio_stub_alloc(struct usbio_dev *bridge, int priv_size)
 {
 	struct usbio_stub *stub;
 
@@ -133,21 +133,21 @@ static struct usbio_stub *usbio_stub_alloc(struct usbio_dev *ljca, int priv_size
 
 	spin_lock_init(&stub->event_cb_lock);
 	INIT_LIST_HEAD(&stub->list);
-	list_add_tail(&stub->list, &ljca->stubs_list);
-	dev_dbg(&ljca->intf->dev, "enuming a stub success\n");
+	list_add_tail(&stub->list, &bridge->stubs_list);
+	dev_dbg(&bridge->intf->dev, "enuming a stub success\n");
 	return stub;
 }
 
-static struct usbio_stub *usbio_stub_find(struct usbio_dev *ljca, u8 type)
+static struct usbio_stub *usbio_stub_find(struct usbio_dev *bridge, u8 type)
 {
 	struct usbio_stub *stub;
 
-	list_for_each_entry (stub, &ljca->stubs_list, list) {
+	list_for_each_entry (stub, &bridge->stubs_list, list) {
 		if (stub->type == type)
 			return stub;
 	}
 
-	dev_err(&ljca->intf->dev, "usb stub not find, type: %d", type);
+	dev_err(&bridge->intf->dev, "usb stub not find, type: %d", type);
 	return ERR_PTR(-ENODEV);
 }
 
@@ -162,11 +162,11 @@ static void usbio_stub_notify(struct usbio_stub *stub, u8 cmd,
 	spin_unlock_irqrestore(&stub->event_cb_lock, flags);
 }
 
-static int usbio_parse(struct usbio_dev *ljca, struct usbio_msg *header)
+static int usbio_parse(struct usbio_dev *bridge, struct usbio_msg *header)
 {
 	struct usbio_stub *stub;
 
-	stub = usbio_stub_find(ljca, header->type);
+	stub = usbio_stub_find(bridge, header->type);
 	if (IS_ERR(stub))
 		return PTR_ERR(stub);
 
@@ -176,7 +176,7 @@ static int usbio_parse(struct usbio_dev *ljca, struct usbio_msg *header)
 	}
 
 	if (stub->cur_cmd != header->cmd) {
-		dev_err(&ljca->intf->dev, "header->cmd:%x != stub->cur_cmd:%x",
+		dev_err(&bridge->intf->dev, "header->cmd:%x != stub->cur_cmd:%x",
 			header->cmd, stub->cur_cmd);
 		return -EINVAL;
 	}
@@ -186,22 +186,106 @@ static int usbio_parse(struct usbio_dev *ljca, struct usbio_msg *header)
 		memcpy(stub->ipacket.ibuf, header->data, header->len);
 
 	stub->acked = true;
-	wake_up(&ljca->ack_wq);
+	wake_up(&bridge->ack_wq);
 
 	return 0;
 }
 
-static int usbio_stub_write(struct usbio_stub *stub, u8 cmd, const void *obuf,
+static int usbio_control_xfer(struct usbio_stub *stub, u8 cmd, const void *obuf,
+			int obuf_len, void *ibuf, int *ibuf_len,
+			bool wait_ack, int timeout)
+{
+	struct usbio_msg *header;
+	struct usbio_dev *bridge = usb_get_intfdata(stub->intf);
+	int actual, ret;
+	u8 flags = CMPL_FLAG;
+
+	if (bridge->state == BRIDGE_STOPPED)
+		return -ENODEV;
+
+	if (obuf_len > bridge->cbuf_len)
+		return -EINVAL;
+
+	if (wait_ack)
+		flags |= ACK_FLAG;
+
+	stub->ipacket.ibuf_len = 0;
+	actual = sizeof(header) + obuf_len;
+	header = kmalloc(actual, GFP_KERNEL);
+	if (!header)
+		return -ENOMEM;
+
+	header->type = stub->type;
+	header->cmd = cmd;
+	header->flags = flags;
+	header->len = obuf_len;
+
+	memcpy(header->data, obuf, obuf_len);
+	dev_info(&bridge->intf->dev,
+			"send: type:0x%x cmd:0x%x flags:0x%x len:%d\n",
+			header->type, header->cmd, header->flags, header->len);
+	usbio_dump(bridge, header->data, header->len);
+
+	mutex_lock(&bridge->mutex);
+	stub->cur_cmd = cmd;
+	stub->ipacket.ibuf = ibuf;
+	stub->acked = false;
+	usb_autopm_get_interface(bridge->intf);
+	ret = usb_control_msg_send(bridge->udev, bridge->ep0, 0,
+			USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_DIR_OUT, 0, 0,
+			header, actual, timeout, GFP_KERNEL);
+	if (ret) {
+		dev_err(&bridge->intf->dev,
+			"bridge write failed ret:%d total_len:%d\n ", ret,
+			actual);
+		goto error;
+	}
+
+	kfree(header);
+	if (wait_ack) {
+		actual = bridge->cbuf_len;
+		header = kmalloc(actual, GFP_KERNEL);
+		if (!header) {
+			ret = -ENOMEM;
+			goto error;
+		}
+
+		ret = usb_control_msg_recv(bridge->udev, bridge->ep0, 0,
+			USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_DIR_IN, 0, 0,
+			header, actual, timeout, GFP_KERNEL);
+		if (ret) {
+			dev_err(&bridge->intf->dev,
+				"bridge read failed ret:%d total_len:%d\n ",
+				ret, actual);
+			goto error;
+		}
+	}
+
+	if (ibuf_len && header) {
+		*ibuf_len = header->len;
+		memcpy(ibuf, header->data, *ibuf_len);
+	}
+
+	stub->ipacket.ibuf = NULL;
+	stub->ipacket.ibuf_len = 0;
+error:
+	kfree(header);
+	usb_autopm_put_interface(bridge->intf);
+	mutex_unlock(&bridge->mutex);
+	return ret;
+}
+
+static int usbio_bulk_write(struct usbio_stub *stub, u8 cmd, const void *obuf,
 			   int obuf_len, void *ibuf, int *ibuf_len,
 			   bool wait_ack, int timeout)
 {
 	struct usbio_msg *header;
-	struct usbio_dev *ljca = usb_get_intfdata(stub->intf);
+	struct usbio_dev *bridge = usb_get_intfdata(stub->intf);
 	int ret;
 	u8 flags = CMPL_FLAG;
 	int actual;
 
-	if (ljca->state == BRIDGE_STOPPED)
+	if (bridge->state == BRIDGE_STOPPED)
 		return -ENODEV;
 
 	if (obuf_len > MAX_PAYLOAD_SIZE)
@@ -221,33 +305,33 @@ static int usbio_stub_write(struct usbio_stub *stub, u8 cmd, const void *obuf,
 	header->len = obuf_len;
 
 	memcpy(header->data, obuf, obuf_len);
-	dev_dbg(&ljca->intf->dev, "send: type:%d cmd:%d flags:%d len:%d\n",
+	dev_dbg(&bridge->intf->dev, "send: type:%d cmd:%d flags:%d len:%d\n",
 		header->type, header->cmd, header->flags, header->len);
-	usbio_dump(ljca, header->data, header->len);
+	usbio_dump(bridge, header->data, header->len);
 
-	mutex_lock(&ljca->mutex);
+	mutex_lock(&bridge->mutex);
 	stub->cur_cmd = cmd;
 	stub->ipacket.ibuf = ibuf;
 	stub->acked = false;
-	usb_autopm_get_interface(ljca->intf);
-	ret = usb_bulk_msg(ljca->udev,
-			   usb_sndbulkpipe(ljca->udev, ljca->out_ep), header,
+	usb_autopm_get_interface(bridge->intf);
+	ret = usb_bulk_msg(bridge->udev,
+			   usb_sndbulkpipe(bridge->udev, bridge->out_ep), header,
 			   sizeof(struct usbio_msg) + obuf_len, &actual,
 			   USB_WRITE_TIMEOUT);
 	kfree(header);
 	if (ret || actual != sizeof(struct usbio_msg) + obuf_len) {
-		dev_err(&ljca->intf->dev,
+		dev_err(&bridge->intf->dev,
 			"bridge write failed ret:%d total_len:%d\n ", ret,
 			actual);
 		goto error;
 	}
 
 	if (wait_ack) {
-		ret = wait_event_timeout(ljca->ack_wq, stub->acked,
+		ret = wait_event_timeout(bridge->ack_wq, stub->acked,
 					 msecs_to_jiffies(timeout));
 		if (!ret || !stub->acked) {
-			dev_err(&ljca->intf->dev,
-				"acked sem wait timed out ret:%d timeout:%d ack:%d\n",
+			dev_err(&bridge->intf->dev,
+				"acked wait timed out ret:%d timeout:%d ack:%d\n",
 				ret, timeout, stub->acked);
 			ret = -ETIMEDOUT;
 			goto error;
@@ -261,8 +345,8 @@ static int usbio_stub_write(struct usbio_stub *stub, u8 cmd, const void *obuf,
 	stub->ipacket.ibuf_len = 0;
 	ret = 0;
 error:
-	usb_autopm_put_interface(ljca->intf);
-	mutex_unlock(&ljca->mutex);
+	usb_autopm_put_interface(bridge->intf);
+	mutex_unlock(&bridge->mutex);
 	return ret;
 }
 
@@ -271,21 +355,25 @@ static int usbio_transfer_internal(struct platform_device *pdev, u8 cmd,
 				  int *ibuf_len, bool wait_ack)
 {
 	struct usbio_platform_data *usbio_pdata;
-	struct usbio_dev *ljca;
+	struct usbio_dev *bridge;
 	struct usbio_stub *stub;
 
 	if (!pdev)
 		return -EINVAL;
 
-	ljca = dev_get_drvdata(pdev->dev.parent);
+	bridge = dev_get_drvdata(pdev->dev.parent);
 	usbio_pdata = dev_get_platdata(&pdev->dev);
-	stub = usbio_stub_find(ljca, usbio_pdata->type);
+	stub = usbio_stub_find(bridge, usbio_pdata->type);
 	if (IS_ERR(stub))
 		return PTR_ERR(stub);
 
-	return usbio_stub_write(stub, cmd, obuf, obuf_len, ibuf, ibuf_len,
-			       wait_ack, USB_WRITE_ACK_TIMEOUT);
-}
+	if (cmd <= GPIO_STUB)
+		return usbio_control_xfer(stub, cmd, obuf, obuf_len,
+			ibuf, ibuf_len,	wait_ack, USB_WRITE_ACK_TIMEOUT);
+	else
+		return usbio_bulk_write(stub, cmd, obuf, obuf_len,
+			ibuf, ibuf_len,	wait_ack, USB_WRITE_ACK_TIMEOUT);
+	}
 
 int usbio_transfer(struct platform_device *pdev, u8 cmd, const void *obuf,
 		  int obuf_len, void *ibuf, int *ibuf_len)
@@ -307,16 +395,16 @@ int usbio_register_event_cb(struct platform_device *pdev,
 			   usbio_event_cb_t event_cb)
 {
 	struct usbio_platform_data *usbio_pdata;
-	struct usbio_dev *ljca;
+	struct usbio_dev *bridge;
 	struct usbio_stub *stub;
 	unsigned long flags;
 
 	if (!pdev)
 		return -EINVAL;
 
-	ljca = dev_get_drvdata(pdev->dev.parent);
+	bridge = dev_get_drvdata(pdev->dev.parent);
 	usbio_pdata = dev_get_platdata(&pdev->dev);
-	stub = usbio_stub_find(ljca, usbio_pdata->type);
+	stub = usbio_stub_find(bridge, usbio_pdata->type);
 	if (IS_ERR(stub))
 		return PTR_ERR(stub);
 
@@ -332,13 +420,13 @@ EXPORT_SYMBOL_GPL(usbio_register_event_cb);
 void usbio_unregister_event_cb(struct platform_device *pdev)
 {
 	struct usbio_platform_data *usbio_pdata;
-	struct usbio_dev *ljca;
+	struct usbio_dev *bridge;
 	struct usbio_stub *stub;
 	unsigned long flags;
 
-	ljca = dev_get_drvdata(pdev->dev.parent);
+	bridge = dev_get_drvdata(pdev->dev.parent);
 	usbio_pdata = dev_get_platdata(&pdev->dev);
-	stub = usbio_stub_find(ljca, usbio_pdata->type);
+	stub = usbio_stub_find(bridge, usbio_pdata->type);
 	if (IS_ERR(stub))
 		return;
 
@@ -349,12 +437,12 @@ void usbio_unregister_event_cb(struct platform_device *pdev)
 }
 EXPORT_SYMBOL_GPL(usbio_unregister_event_cb);
 
-static void usbio_stub_cleanup(struct usbio_dev *ljca)
+static void usbio_stub_cleanup(struct usbio_dev *bridge)
 {
 	struct usbio_stub *stub;
 	struct usbio_stub *next;
 
-	list_for_each_entry_safe (stub, next, &ljca->stubs_list, list) {
+	list_for_each_entry_safe (stub, next, &bridge->stubs_list, list) {
 		list_del_init(&stub->list);
 		kfree(stub);
 	}
@@ -362,16 +450,16 @@ static void usbio_stub_cleanup(struct usbio_dev *ljca)
 
 static void usbio_read_complete(struct urb *urb)
 {
-	struct usbio_dev *ljca = urb->context;
+	struct usbio_dev *bridge = urb->context;
 	struct usbio_msg *header = urb->transfer_buffer;
 	int len = urb->actual_length;
 	int ret;
 
-	dev_dbg(&ljca->intf->dev,
+	dev_dbg(&bridge->intf->dev,
 		"bulk read urb got message from fw, status:%d data_len:%d\n",
 		urb->status, urb->actual_length);
 
-	BUG_ON(!ljca);
+	BUG_ON(!bridge);
 	BUG_ON(!header);
 
 	if (urb->status) {
@@ -380,46 +468,46 @@ static void usbio_read_complete(struct urb *urb)
 		    urb->status == -ESHUTDOWN)
 			return;
 
-		dev_err(&ljca->intf->dev, "read bulk urb transfer failed: %d\n",
+		dev_err(&bridge->intf->dev, "read bulk urb transfer failed: %d\n",
 			urb->status);
 		goto resubmit;
 	}
 
-	dev_dbg(&ljca->intf->dev, "receive: type:%d cmd:%d flags:%d len:%d\n",
+	dev_dbg(&bridge->intf->dev, "receive: type:%d cmd:%d flags:%d len:%d\n",
 		header->type, header->cmd, header->flags, header->len);
-	usbio_dump(ljca, header->data, header->len);
+	usbio_dump(bridge, header->data, header->len);
 
 	if (!usbio_validate(header, len)) {
-		dev_err(&ljca->intf->dev,
+		dev_err(&bridge->intf->dev,
 			"data not correct header->len:%d payload_len:%d\n ",
 			header->len, len);
 		goto resubmit;
 	}
 
-	ret = usbio_parse(ljca, header);
+	ret = usbio_parse(bridge, header);
 	if (ret)
-		dev_err(&ljca->intf->dev,
+		dev_err(&bridge->intf->dev,
 			"failed to parse data: ret:%d type:%d len: %d", ret,
 			header->type, header->len);
 
 resubmit:
 	ret = usb_submit_urb(urb, GFP_ATOMIC);
 	if (ret)
-		dev_err(&ljca->intf->dev,
+		dev_err(&bridge->intf->dev,
 			"failed submitting read urb, error %d\n", ret);
 }
 
-static int usbio_start(struct usbio_dev *ljca)
+static int usbio_start(struct usbio_dev *bridge)
 {
 	int ret;
 
-	usb_fill_bulk_urb(ljca->in_urb, ljca->udev,
-			  usb_rcvbulkpipe(ljca->udev, ljca->in_ep), ljca->ibuf,
-			  ljca->ibuf_len, usbio_read_complete, ljca);
+	usb_fill_bulk_urb(bridge->in_urb, bridge->udev,
+			  usb_rcvbulkpipe(bridge->udev, bridge->in_ep), bridge->ibuf,
+			  bridge->ibuf_len, usbio_read_complete, bridge);
 
-	ret = usb_submit_urb(ljca->in_urb, GFP_KERNEL);
+	ret = usb_submit_urb(bridge->in_urb, GFP_KERNEL);
 	if (ret) {
-		dev_err(&ljca->intf->dev,
+		dev_err(&bridge->intf->dev,
 			"failed submitting read urb, error %d\n", ret);
 	}
 	return ret;
@@ -432,20 +520,13 @@ struct usbio_mng_priv {
 static int usbio_mng_reset_handshake(struct usbio_stub *stub)
 {
 	int ret;
-	struct usbio_mng_priv *priv;
-	__le32 reset_id;
-	__le32 reset_id_ret = 0;
 	int ilen;
 
-	priv = usbio_priv(stub);
-	reset_id = cpu_to_le32(priv->reset_id++);
-	ret = usbio_stub_write(stub, CTRL_RESET_NOTIFY, &reset_id,
-			      sizeof(reset_id), &reset_id_ret, &ilen, true,
-			      USB_WRITE_ACK_TIMEOUT);
-	if (ret || ilen != sizeof(reset_id_ret) || reset_id_ret != reset_id) {
+	ret = usbio_control_xfer(stub, CTRL_RESET_NOTIFY, 0, 0, 0,
+			&ilen, true, USB_WRITE_ACK_TIMEOUT);
+	if (ret) {
 		dev_err(&stub->intf->dev,
-			"CTRL_RESET_NOTIFY failed reset_id:%d/%d ret:%d\n",
-			le32_to_cpu(reset_id_ret), le32_to_cpu(reset_id), ret);
+			"CTRL_RESET_NOTIFY failed ret:%d\n", ret);
 		return -EIO;
 	}
 
@@ -454,72 +535,74 @@ static int usbio_mng_reset_handshake(struct usbio_stub *stub)
 
 static inline int usbio_mng_reset(struct usbio_stub *stub)
 {
-	return usbio_stub_write(stub, CTRL_RESET, NULL, 0, NULL, NULL, true,
+	return usbio_control_xfer(stub, CTRL_RESET, NULL, 0, NULL, NULL, true,
 			       USB_WRITE_ACK_TIMEOUT);
 }
 
-static int usbio_add_mfd_cell(struct usbio_dev *ljca, struct mfd_cell *cell)
+static int usbio_add_mfd_cell(struct usbio_dev *bridge, struct mfd_cell *cell)
 {
 	struct mfd_cell *new_cells;
 
 	/* Enumerate the device even if it does not appear in DSDT */
 	if (!cell->acpi_match->pnpid)
-		dev_warn(&ljca->intf->dev,
+		dev_warn(&bridge->intf->dev,
 			 "The HID of cell %s does not exist in DSDT\n",
 			 cell->name);
 
-	new_cells = krealloc_array(ljca->cells, (ljca->cell_count + 1),
+	new_cells = krealloc_array(bridge->cells, (bridge->cell_count + 1),
 				   sizeof(struct mfd_cell), GFP_KERNEL);
 	if (!new_cells)
 		return -ENOMEM;
 
-	memcpy(&new_cells[ljca->cell_count], cell, sizeof(*cell));
-	ljca->cells = new_cells;
-	ljca->cell_count++;
+	memcpy(&new_cells[bridge->cell_count], cell, sizeof(*cell));
+	bridge->cells = new_cells;
+	bridge->cell_count++;
 
 	return 0;
 }
 
-static int usbio_gpio_stub_init(struct usbio_dev *ljca,
+static int usbio_gpio_stub_init(struct usbio_dev *bridge,
 			       struct usbio_gpio_descriptor *desc)
 {
 	struct usbio_stub *stub;
 	struct mfd_cell cell = { 0 };
 	struct usbio_platform_data *pdata;
-	int gpio_num = desc->pins_per_bank * desc->bank_num;
+	int gpio_num = desc->pins_per_bank * desc->banks;
 	int i;
 	u32 valid_pin[MAX_GPIO_NUM / (sizeof(u32) * BITS_PER_BYTE)];
 
 	if (gpio_num > MAX_GPIO_NUM)
 		return -EINVAL;
 
-	stub = usbio_stub_alloc(ljca, sizeof(*pdata));
+	stub = usbio_stub_alloc(bridge, sizeof(*pdata));
 	if (IS_ERR(stub))
 		return PTR_ERR(stub);
 
 	stub->type = GPIO_STUB;
-	stub->intf = ljca->intf;
+	stub->intf = bridge->intf;
 
 	pdata = usbio_priv(stub);
 	pdata->type = stub->type;
 	pdata->gpio_info.num = gpio_num;
 
-	for (i = 0; i < desc->bank_num; i++)
+	for (i = 0; i < desc->banks; i++) {
 		valid_pin[i] = desc->bank_desc[i].valid_pins;
+		dev_info(&bridge->intf->dev, "bank:%d map:0x%08x\n", i, valid_pin[i]);
+	}
 
 	bitmap_from_arr32(pdata->gpio_info.valid_pin_map, valid_pin, gpio_num);
 
-	cell.name = "ljca-gpio";
+	cell.name = "usbio-gpio";
 	cell.platform_data = pdata;
 	cell.pdata_size = sizeof(*pdata);
 	cell.acpi_match = &usbio_acpi_match_gpio;
 
-	return usbio_add_mfd_cell(ljca, &cell);
+	return usbio_add_mfd_cell(bridge, &cell);
 }
 
 static int usbio_mng_enum_gpio(struct usbio_stub *stub)
 {
-	struct usbio_dev *ljca = usb_get_intfdata(stub->intf);
+	struct usbio_dev *bridge = usb_get_intfdata(stub->intf);
 	struct usbio_gpio_descriptor *desc;
 	int ret;
 	int len;
@@ -528,23 +611,26 @@ static int usbio_mng_enum_gpio(struct usbio_stub *stub)
 	if (!desc)
 		return -ENOMEM;
 
-	ret = usbio_stub_write(stub, CTRL_ENUM_GPIO, NULL, 0, desc, &len, true,
+	ret = usbio_control_xfer(stub, CTRL_ENUM_GPIO, NULL, 0, desc->bank_desc, &len, true,
 			      USB_ENUM_STUB_TIMEOUT);
-	if (ret || len != sizeof(*desc) + desc->bank_num *
-						  sizeof(desc->bank_desc[0])) {
+	if (ret || !len || (len % sizeof(*desc->bank_desc))) {
 		dev_err(&stub->intf->dev,
-			"enum gpio failed ret:%d len:%d bank_num:%d\n", ret,
-			len, desc->bank_num);
+			"enum gpio failed ret:%d len:%d bank_desc:%ld\n", ret,
+			len, sizeof(*desc->bank_desc));
 		kfree(desc);
 		return -EIO;
 	}
 
-	ret = usbio_gpio_stub_init(ljca, desc);
+	desc->pins_per_bank = GPIO_PER_BANK;
+	desc->banks = len / sizeof(struct usbio_bank_descriptor);
+	ret = usbio_gpio_stub_init(bridge, desc);
 	kfree(desc);
+	if (ret)
+		dev_err(&stub->intf->dev, "enum gpio failed ret:%d\n", ret);
 	return ret;
 }
 
-static int usbio_i2c_stub_init(struct usbio_dev *ljca,
+static int usbio_i2c_stub_init(struct usbio_dev *bridge,
 			      struct usbio_i2c_descriptor *desc)
 {
 	struct usbio_stub *stub;
@@ -552,12 +638,12 @@ static int usbio_i2c_stub_init(struct usbio_dev *ljca,
 	int i;
 	int ret;
 
-	stub = usbio_stub_alloc(ljca, desc->num * sizeof(*pdata));
+	stub = usbio_stub_alloc(bridge, desc->num * sizeof(*pdata));
 	if (IS_ERR(stub))
 		return PTR_ERR(stub);
 
 	stub->type = I2C_STUB;
-	stub->intf = ljca->intf;
+	stub->intf = bridge->intf;
 	pdata = usbio_priv(stub);
 
 	for (i = 0; i < desc->num; i++) {
@@ -568,13 +654,13 @@ static int usbio_i2c_stub_init(struct usbio_dev *ljca,
 		pdata[i].i2c_info.capacity = desc->info[i].capacity;
 		pdata[i].i2c_info.intr_pin = desc->info[i].intr_pin;
 
-		cell.name = "ljca-i2c";
+		cell.name = "usbio-i2c";
 		cell.platform_data = &pdata[i];
 		cell.pdata_size = sizeof(pdata[i]);
 		if (i < ARRAY_SIZE(usbio_acpi_match_i2cs))
 			cell.acpi_match = &usbio_acpi_match_i2cs[i];
 
-		ret = usbio_add_mfd_cell(ljca, &cell);
+		ret = usbio_add_mfd_cell(bridge, &cell);
 		if (ret)
 			return ret;
 	}
@@ -584,7 +670,7 @@ static int usbio_i2c_stub_init(struct usbio_dev *ljca,
 
 static int usbio_mng_enum_i2c(struct usbio_stub *stub)
 {
-	struct usbio_dev *ljca = usb_get_intfdata(stub->intf);
+	struct usbio_dev *bridge = usb_get_intfdata(stub->intf);
 	struct usbio_i2c_descriptor *desc;
 	int ret;
 	int len;
@@ -593,7 +679,7 @@ static int usbio_mng_enum_i2c(struct usbio_stub *stub)
 	if (!desc)
 		return -ENOMEM;
 
-	ret = usbio_stub_write(stub, CTRL_ENUM_I2C, NULL, 0, desc, &len, true,
+	ret = usbio_control_xfer(stub, CTRL_ENUM_I2C, NULL, 0, desc, &len, true,
 			      USB_ENUM_STUB_TIMEOUT);
 	if (ret) {
 		dev_err(&stub->intf->dev,
@@ -603,12 +689,12 @@ static int usbio_mng_enum_i2c(struct usbio_stub *stub)
 		return -EIO;
 	}
 
-	ret = usbio_i2c_stub_init(ljca, desc);
+	ret = usbio_i2c_stub_init(bridge, desc);
 	kfree(desc);
 	return ret;
 }
 
-static int usbio_spi_stub_init(struct usbio_dev *ljca,
+static int usbio_spi_stub_init(struct usbio_dev *bridge,
 			      struct usbio_spi_descriptor *desc)
 {
 	struct usbio_stub *stub;
@@ -616,12 +702,12 @@ static int usbio_spi_stub_init(struct usbio_dev *ljca,
 	int i;
 	int ret;
 
-	stub = usbio_stub_alloc(ljca, desc->num * sizeof(*pdata));
+	stub = usbio_stub_alloc(bridge, desc->num * sizeof(*pdata));
 	if (IS_ERR(stub))
 		return PTR_ERR(stub);
 
 	stub->type = SPI_STUB;
-	stub->intf = ljca->intf;
+	stub->intf = bridge->intf;
 	pdata = usbio_priv(stub);
 
 	for (i = 0; i < desc->num; i++) {
@@ -631,13 +717,13 @@ static int usbio_spi_stub_init(struct usbio_dev *ljca,
 		pdata[i].spi_info.id = desc->info[i].id;
 		pdata[i].spi_info.capacity = desc->info[i].capacity;
 
-		cell.name = "ljca-spi";
+		cell.name = "usbio-spi";
 		cell.platform_data = &pdata[i];
 		cell.pdata_size = sizeof(pdata[i]);
 		if (i < ARRAY_SIZE(usbio_acpi_match_spis))
 			cell.acpi_match = &usbio_acpi_match_spis[i];
 
-		ret = usbio_add_mfd_cell(ljca, &cell);
+		ret = usbio_add_mfd_cell(bridge, &cell);
 		if (ret)
 			return ret;
 	}
@@ -647,7 +733,7 @@ static int usbio_spi_stub_init(struct usbio_dev *ljca,
 
 static int usbio_mng_enum_spi(struct usbio_stub *stub)
 {
-	struct usbio_dev *ljca = usb_get_intfdata(stub->intf);
+	struct usbio_dev *bridge = usb_get_intfdata(stub->intf);
 	struct usbio_spi_descriptor *desc;
 	int ret;
 	int len;
@@ -656,7 +742,7 @@ static int usbio_mng_enum_spi(struct usbio_stub *stub)
 	if (!desc)
 		return -ENOMEM;
 
-	ret = usbio_stub_write(stub, CTRL_ENUM_SPI, NULL, 0, desc, &len, true,
+	ret = usbio_control_xfer(stub, CTRL_ENUM_SPI, NULL, 0, desc, &len, true,
 			      USB_ENUM_STUB_TIMEOUT);
 	if (ret) {
 		dev_err(&stub->intf->dev,
@@ -666,7 +752,7 @@ static int usbio_mng_enum_spi(struct usbio_stub *stub)
 		return -EIO;
 	}
 
-	ret = usbio_spi_stub_init(ljca, desc);
+	ret = usbio_spi_stub_init(bridge, desc);
 	kfree(desc);
 	return ret;
 }
@@ -680,7 +766,7 @@ static int usbio_mng_get_version(struct usbio_stub *stub, char *buf)
 	if (!buf)
 		return -EINVAL;
 
-	ret = usbio_stub_write(stub, CTRL_GET_VERSION, NULL, 0, &version, &len,
+	ret = usbio_control_xfer(stub, CTRL_FW_VERSION, NULL, 0, &version, &len,
 			      true, USB_WRITE_ACK_TIMEOUT);
 	if (ret || len < sizeof(struct fw_version)) {
 		dev_err(&stub->intf->dev,
@@ -695,11 +781,11 @@ static int usbio_mng_get_version(struct usbio_stub *stub, char *buf)
 
 static inline int usbio_mng_set_dfu_mode(struct usbio_stub *stub)
 {
-	return usbio_stub_write(stub, CTRL_SET_DFU_MODE, NULL, 0, NULL, NULL,
+	return usbio_control_xfer(stub, CTRL_SET_DFU_MODE, NULL, 0, NULL, NULL,
 			       true, USB_WRITE_ACK_TIMEOUT);
 }
 
-static int usbio_mng_link(struct usbio_dev *ljca, struct usbio_stub *stub)
+static int usbio_mng_link(struct usbio_dev *bridge, struct usbio_stub *stub)
 {
 	int ret;
 
@@ -707,28 +793,28 @@ static int usbio_mng_link(struct usbio_dev *ljca, struct usbio_stub *stub)
 	if (ret)
 		return ret;
 
-	ljca->state = BRIDGE_RESET_SYNCED;
+	bridge->state = BRIDGE_RESET_SYNCED;
 
 	/* workaround for FW limitation, ignore return value of enum result */
 	usbio_mng_enum_gpio(stub);
-	ljca->state = BRIDGE_ENUM_GPIO_COMPLETE;
+	bridge->state = BRIDGE_ENUM_GPIO_COMPLETE;
 
 	usbio_mng_enum_i2c(stub);
-	ljca->state = BRIDGE_ENUM_I2C_COMPLETE;
+	bridge->state = BRIDGE_ENUM_I2C_COMPLETE;
 
 	usbio_mng_enum_spi(stub);
-	ljca->state = BRIDGE_ENUM_SPI_COMPLETE;
+	bridge->state = BRIDGE_ENUM_SPI_COMPLETE;
 
 	return 0;
 }
 
-static int usbio_mng_init(struct usbio_dev *ljca)
+static int usbio_mng_init(struct usbio_dev *bridge)
 {
 	struct usbio_stub *stub;
 	struct usbio_mng_priv *priv;
 	int ret;
 
-	stub = usbio_stub_alloc(ljca, sizeof(*priv));
+	stub = usbio_stub_alloc(bridge, sizeof(*priv));
 	if (IS_ERR(stub))
 		return PTR_ERR(stub);
 
@@ -738,13 +824,13 @@ static int usbio_mng_init(struct usbio_dev *ljca)
 
 	priv->reset_id = 0;
 	stub->type = CTRL_STUB;
-	stub->intf = ljca->intf;
+	stub->intf = bridge->intf;
 
-	ret = usbio_mng_link(ljca, stub);
+	ret = usbio_mng_link(bridge, stub);
 	if (ret)
-		dev_err(&ljca->intf->dev,
+		dev_err(&bridge->intf->dev,
 			"mng stub link done ret:%d state:%d\n", ret,
-			ljca->state);
+			bridge->state);
 
 	return ret;
 }
@@ -757,7 +843,7 @@ static inline int usbio_diag_get_fw_log(struct usbio_stub *stub, void *buf)
 	if (!buf)
 		return -EINVAL;
 
-	ret = usbio_stub_write(stub, DIAG_GET_FW_LOG, NULL, 0, buf, &len, true,
+	ret = usbio_control_xfer(stub, DIAG_GET_FW_LOG, NULL, 0, buf, &len, true,
 			      USB_WRITE_ACK_TIMEOUT);
 	if (ret)
 		return ret;
@@ -773,7 +859,7 @@ static inline int usbio_diag_get_coredump(struct usbio_stub *stub, void *buf)
 	if (!buf)
 		return -EINVAL;
 
-	ret = usbio_stub_write(stub, DIAG_GET_FW_COREDUMP, NULL, 0, buf, &len,
+	ret = usbio_control_xfer(stub, DIAG_GET_FW_COREDUMP, NULL, 0, buf, &len,
 			      true, USB_WRITE_ACK_TIMEOUT);
 	if (ret)
 		return ret;
@@ -783,58 +869,58 @@ static inline int usbio_diag_get_coredump(struct usbio_stub *stub, void *buf)
 
 static inline int usbio_diag_set_trace_level(struct usbio_stub *stub, u8 level)
 {
-	return usbio_stub_write(stub, DIAG_SET_TRACE_LEVEL, &level,
+	return usbio_control_xfer(stub, DIAG_SET_TRACE_LEVEL, &level,
 			       sizeof(level), NULL, NULL, true,
 			       USB_WRITE_ACK_TIMEOUT);
 }
 
-static int usbio_diag_init(struct usbio_dev *ljca)
+static int usbio_diag_init(struct usbio_dev *bridge)
 {
 	struct usbio_stub *stub;
 
-	stub = usbio_stub_alloc(ljca, 0);
+	stub = usbio_stub_alloc(bridge, 0);
 	if (IS_ERR(stub))
 		return PTR_ERR(stub);
 
 	stub->type = DIAG_STUB;
-	stub->intf = ljca->intf;
+	stub->intf = bridge->intf;
 	return 0;
 }
 
-static void usbio_delete(struct usbio_dev *ljca)
+static void usbio_delete(struct usbio_dev *bridge)
 {
-	mutex_destroy(&ljca->mutex);
-	usb_free_urb(ljca->in_urb);
-	usb_put_intf(ljca->intf);
-	usb_put_dev(ljca->udev);
-	kfree(ljca->ibuf);
-	kfree(ljca->cells);
-	kfree(ljca);
+	mutex_destroy(&bridge->mutex);
+	usb_free_urb(bridge->in_urb);
+	usb_put_intf(bridge->intf);
+	usb_put_dev(bridge->udev);
+	kfree(bridge->ibuf);
+	kfree(bridge->cells);
+	kfree(bridge);
 }
 
-static int usbio_init(struct usbio_dev *ljca)
+static int usbio_init(struct usbio_dev *bridge)
 {
-	mutex_init(&ljca->mutex);
-	init_waitqueue_head(&ljca->ack_wq);
-	INIT_LIST_HEAD(&ljca->stubs_list);
+	mutex_init(&bridge->mutex);
+	init_waitqueue_head(&bridge->ack_wq);
+	INIT_LIST_HEAD(&bridge->stubs_list);
 
-	ljca->state = BRIDGE_INITED;
+	bridge->state = BRIDGE_INITED;
 
 	return 0;
 }
 
-static void usbio_stop(struct usbio_dev *ljca)
+static void usbio_stop(struct usbio_dev *bridge)
 {
-	usb_kill_urb(ljca->in_urb);
+	usb_kill_urb(bridge->in_urb);
 }
 
 static ssize_t cmd_store(struct device *dev, struct device_attribute *attr,
 			 const char *buf, size_t count)
 {
 	struct usb_interface *intf = to_usb_interface(dev);
-	struct usbio_dev *ljca = usb_get_intfdata(intf);
-	struct usbio_stub *mng_stub = usbio_stub_find(ljca, CTRL_STUB);
-	struct usbio_stub *diag_stub = usbio_stub_find(ljca, DIAG_STUB);
+	struct usbio_dev *bridge = usb_get_intfdata(intf);
+	struct usbio_stub *mng_stub = usbio_stub_find(bridge, CTRL_STUB);
+	struct usbio_stub *diag_stub = usbio_stub_find(bridge, DIAG_STUB);
 
 	if (sysfs_streq(buf, "dfu"))
 		usbio_mng_set_dfu_mode(mng_stub);
@@ -857,8 +943,8 @@ static ssize_t version_show(struct device *dev, struct device_attribute *attr,
 			    char *buf)
 {
 	struct usb_interface *intf = to_usb_interface(dev);
-	struct usbio_dev *ljca = usb_get_intfdata(intf);
-	struct usbio_stub *stub = usbio_stub_find(ljca, CTRL_STUB);
+	struct usbio_dev *bridge = usb_get_intfdata(intf);
+	struct usbio_stub *stub = usbio_stub_find(bridge, CTRL_STUB);
 
 	return usbio_mng_get_version(stub, buf);
 }
@@ -868,8 +954,8 @@ static ssize_t log_show(struct device *dev, struct device_attribute *attr,
 			char *buf)
 {
 	struct usb_interface *intf = to_usb_interface(dev);
-	struct usbio_dev *ljca = usb_get_intfdata(intf);
-	struct usbio_stub *diag_stub = usbio_stub_find(ljca, DIAG_STUB);
+	struct usbio_dev *bridge = usb_get_intfdata(intf);
+	struct usbio_stub *diag_stub = usbio_stub_find(bridge, DIAG_STUB);
 
 	return usbio_diag_get_fw_log(diag_stub, buf);
 }
@@ -879,8 +965,8 @@ static ssize_t coredump_show(struct device *dev, struct device_attribute *attr,
 			     char *buf)
 {
 	struct usb_interface *intf = to_usb_interface(dev);
-	struct usbio_dev *ljca = usb_get_intfdata(intf);
-	struct usbio_stub *diag_stub = usbio_stub_find(ljca, DIAG_STUB);
+	struct usbio_dev *bridge = usb_get_intfdata(intf);
+	struct usbio_stub *diag_stub = usbio_stub_find(bridge, DIAG_STUB);
 
 	return usbio_diag_get_coredump(diag_stub, buf);
 }
@@ -898,8 +984,8 @@ ATTRIBUTE_GROUPS(usbio);
 static int usbio_probe(struct usb_interface *intf,
 		      const struct usb_device_id *id)
 {
-	struct usbio_dev *ljca;
-	struct usb_endpoint_descriptor *bulk_in, *bulk_out;
+	struct usbio_dev *bridge;
+	struct usb_endpoint_descriptor *ep0, *bulk_in, *bulk_out;
 	int ret;
 
 	ret = precheck_acpi_hid(intf);
@@ -907,15 +993,38 @@ static int usbio_probe(struct usb_interface *intf,
 		return ret;
 
 	/* allocate memory for our device state and initialize it */
-	ljca = kzalloc(sizeof(*ljca), GFP_KERNEL);
-	if (!ljca)
+	bridge = kzalloc(sizeof(*bridge), GFP_KERNEL);
+	if (!bridge)
 		return -ENOMEM;
 
-	/* TODO: Get device descriptor and buffer size */
+	usbio_init(bridge);
+	bridge->udev = usb_get_dev(interface_to_usbdev(intf));
+	bridge->intf = usb_get_intf(intf);
 
-	usbio_init(ljca);
-	ljca->udev = usb_get_dev(interface_to_usbdev(intf));
-	ljca->intf = usb_get_intf(intf);
+	/* control transfer enpoint information */
+	if (!&bridge->udev->ep0) {
+		dev_err(&intf->dev,
+			"Could not find control endpoint\n");
+		goto error;
+	}
+
+	ep0 = &bridge->udev->ep0.desc;
+	if (!ep0) {
+		dev_err(&intf->dev,
+			"Could not find control endpoint descriptor\n");
+		goto error;
+	}
+
+	bridge->ep0 = ep0->bEndpointAddress;
+	bridge->cbuf_len = usb_endpoint_maxp(ep0);
+	bridge->cbuf = kzalloc(bridge->cbuf_len, GFP_KERNEL);
+	if (!bridge->cbuf) {
+		ret = -ENOMEM;
+		goto error;
+	}
+
+	dev_dbg(&intf->dev, "ep0 addr:%d size:%u\n",
+		bridge->ep0, bridge->cbuf_len);
 
 	/* set up the endpoint information use only the first bulk-in and bulk-out endpoints */
 	ret = usb_find_common_endpoints(intf->cur_altsetting, &bulk_in,
@@ -926,98 +1035,98 @@ static int usbio_probe(struct usb_interface *intf,
 		goto error;
 	}
 
-	ljca->ibuf_len = usb_endpoint_maxp(bulk_in);
-	ljca->in_ep = bulk_in->bEndpointAddress;
-	ljca->ibuf = kzalloc(ljca->ibuf_len, GFP_KERNEL);
-	if (!ljca->ibuf) {
+	bridge->in_ep = bulk_in->bEndpointAddress;
+	bridge->ibuf_len = usb_endpoint_maxp(bulk_in);
+	bridge->ibuf = kzalloc(bridge->ibuf_len, GFP_KERNEL);
+	if (!bridge->ibuf) {
 		ret = -ENOMEM;
 		goto error;
 	}
 
-	ljca->in_urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (!ljca->in_urb) {
+	bridge->in_urb = usb_alloc_urb(0, GFP_KERNEL);
+	if (!bridge->in_urb) {
 		ret = -ENOMEM;
 		goto error;
 	}
 
-	ljca->out_ep = bulk_out->bEndpointAddress;
-	dev_dbg(&intf->dev, "bulk_in size:%zu addr:%d bulk_out addr:%d\n",
-		ljca->ibuf_len, ljca->in_ep, ljca->out_ep);
+	bridge->out_ep = bulk_out->bEndpointAddress;
+	dev_dbg(&intf->dev, "bulk_in addr:%d bulk_out addr:%d size:%u\n",
+		bridge->in_ep, bridge->out_ep, bridge->ibuf_len);
 
 	/* save our data pointer in this intf device */
-	usb_set_intfdata(intf, ljca);
-	ret = usbio_start(ljca);
+	usb_set_intfdata(intf, bridge);
+	ret = usbio_start(bridge);
 	if (ret) {
 		dev_err(&intf->dev, "bridge read start failed ret %d\n", ret);
 		goto error;
 	}
 
-	ret = usbio_mng_init(ljca);
+	ret = usbio_mng_init(bridge);
 	if (ret) {
 		dev_err(&intf->dev, "register mng stub failed ret %d\n", ret);
 		goto error_stop;
 	}
 
-	ret = usbio_diag_init(ljca);
+	ret = usbio_diag_init(bridge);
 	if (ret) {
 		dev_err(&intf->dev, "register diag stub failed ret %d\n", ret);
 		goto error_stop;
 	}
 
-	ret = mfd_add_hotplug_devices(&intf->dev, ljca->cells,
-				      ljca->cell_count);
+	ret = mfd_add_hotplug_devices(&intf->dev, bridge->cells,
+				      bridge->cell_count);
 	if (ret) {
 		dev_err(&intf->dev, "failed to add mfd devices to core %d\n",
-			ljca->cell_count);
+			bridge->cell_count);
 		goto error_stop;
 	}
 
-	ljca->state = BRIDGE_STARTED;
-	dev_info(&intf->dev, "LJCA USB device init success\n");
+	bridge->state = BRIDGE_STARTED;
+	dev_info(&intf->dev, "USB Bridge device init success\n");
 	return 0;
 error_stop:
-	usbio_stop(ljca);
+	usbio_stop(bridge);
 error:
-	dev_err(&intf->dev, "LJCA USB device init failed\n");
+	dev_err(&intf->dev, "USB Bridge device init failed\n");
 	/* this frees allocated memory */
-	usbio_stub_cleanup(ljca);
-	usbio_delete(ljca);
+	usbio_stub_cleanup(bridge);
+	usbio_delete(bridge);
 	return ret;
 }
 
 static void usbio_disconnect(struct usb_interface *intf)
 {
-	struct usbio_dev *ljca;
+	struct usbio_dev *bridge;
 
-	ljca = usb_get_intfdata(intf);
+	bridge = usb_get_intfdata(intf);
 
-	usbio_stop(ljca);
-	ljca->state = BRIDGE_STOPPED;
+	usbio_stop(bridge);
+	bridge->state = BRIDGE_STOPPED;
 	mfd_remove_devices(&intf->dev);
-	usbio_stub_cleanup(ljca);
+	usbio_stub_cleanup(bridge);
 	usb_set_intfdata(intf, NULL);
-	usbio_delete(ljca);
-	dev_info(&intf->dev, "LJCA disconnected\n");
+	usbio_delete(bridge);
+	dev_info(&intf->dev, "USB Bridge disconnected\n");
 }
 
 static int usbio_suspend(struct usb_interface *intf, pm_message_t message)
 {
-	struct usbio_dev *ljca = usb_get_intfdata(intf);
+	struct usbio_dev *bridge = usb_get_intfdata(intf);
 
-	usbio_stop(ljca);
-	ljca->state = BRIDGE_SUSPEND;
+	usbio_stop(bridge);
+	bridge->state = BRIDGE_SUSPEND;
 
-	dev_dbg(&intf->dev, "LJCA suspend\n");
+	dev_dbg(&intf->dev, "USB Bridge suspend\n");
 	return 0;
 }
 
 static int usbio_resume(struct usb_interface *intf)
 {
-	struct usbio_dev *ljca = usb_get_intfdata(intf);
+	struct usbio_dev *bridge = usb_get_intfdata(intf);
 
-	ljca->state = BRIDGE_STARTED;
-	dev_dbg(&intf->dev, "LJCA resume\n");
-	return usbio_start(ljca);
+	bridge->state = BRIDGE_STARTED;
+	dev_dbg(&intf->dev, "USB Bridge resume\n");
+	return usbio_start(bridge);
 }
 
 static const struct usb_device_id usbio_table[] = {
