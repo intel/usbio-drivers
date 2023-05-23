@@ -7,7 +7,9 @@
 #include <linux/platform_device.h>
 #include <linux/types.h>
 
-#define MAX_GPIO_NUM 32
+#define MAX_BANK_NUM 5
+#define GPIO_PER_BANK 32
+#define MAX_GPIO_NUM (MAX_BANK_NUM * GPIO_PER_BANK)
 
 struct usbio_gpio_info {
 	int num;

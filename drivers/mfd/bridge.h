@@ -14,13 +14,14 @@ enum stub_type {
 
 /* CTRL stub commands */
 enum usbio_mng_cmd {
-	CTRL_GET_VERSION = 1,
+	CTRL_PROT_VERSION = 0,
+	CTRL_FW_VERSION,
 	CTRL_RESET_NOTIFY,
 	CTRL_RESET,
-	CTRL_ENUM_GPIO,
-	CTRL_ENUM_I2C,
 	CTRL_POWER_STATE_CHANGE,
 	CTRL_SET_DFU_MODE,
+	CTRL_ENUM_GPIO = 0x10,
+	CTRL_ENUM_I2C,
 	CTRL_ENUM_SPI,
 };
 
@@ -42,6 +43,7 @@ enum diag_cmd {
 #define ACK_FLAG BIT(0)
 #define RESP_FLAG BIT(1)
 #define CMPL_FLAG BIT(2)
+#define ERR_FLAG BIT(3)
 
 /* Control Transfer Message */
 struct usbio_msg {
@@ -99,7 +101,7 @@ struct usbio_bank_descriptor {
 
 struct usbio_gpio_descriptor {
 	u8 pins_per_bank;
-	u8 bank_num;
+	u8 banks;
 	struct usbio_bank_descriptor bank_desc[];
 } __packed;
 
@@ -155,13 +157,18 @@ enum bridge_state {
 struct usbio_dev {
 	struct usb_device *udev;
 	struct usb_interface *intf;
+	u8 ep0; /* the address of the control endpoint */
 	u8 in_ep; /* the address of the bulk in endpoint */
 	u8 out_ep; /* the address of the bulk out endpoint */
 
+	/* control buffer for xfer */
+	u16 cbuf_len;
+	unsigned char *cbuf;
+
 	/* the urb/buffer for read */
+	u16 ibuf_len;
 	struct urb *in_urb;
 	unsigned char *ibuf;
-	size_t ibuf_len;
 
 	enum bridge_state state;
 
