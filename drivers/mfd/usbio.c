@@ -35,7 +35,7 @@ static char *i2c_hids[] = {
 	"INTC100C", /* RPL */
 	"INTC10D2", /* MTL */
 };
-static struct mfd_cell_acpi_match usbio_acpi_match_i2cs[2];
+static struct mfd_cell_acpi_match usbio_acpi_match_i2cs;
 
 static char *spi_hids[] = {
 	"INTC1091", /* TGL */
@@ -43,7 +43,7 @@ static char *spi_hids[] = {
 	"INTC100D", /* RPL */
 	"INTC10D3", /* MTL */
 };
-static struct mfd_cell_acpi_match usbio_acpi_match_spis[1];
+static struct mfd_cell_acpi_match usbio_acpi_match_spis;
 
 static int try_match_acpi_hid(struct acpi_device *child,
 			      struct mfd_cell_acpi_match *match, char **hids,
@@ -68,11 +68,9 @@ static int match_device_ids(struct acpi_device *adev, void *data)
 	(void)data;
 	try_match_acpi_hid(adev, &usbio_acpi_match_gpio, gpio_hids,
 			   ARRAY_SIZE(gpio_hids));
-	try_match_acpi_hid(adev, &usbio_acpi_match_i2cs[0], i2c_hids,
+	try_match_acpi_hid(adev, &usbio_acpi_match_i2cs, i2c_hids,
 			   ARRAY_SIZE(i2c_hids));
-	try_match_acpi_hid(adev, &usbio_acpi_match_i2cs[1], i2c_hids,
-			   ARRAY_SIZE(i2c_hids));
-	try_match_acpi_hid(adev, &usbio_acpi_match_spis[0], spi_hids,
+	try_match_acpi_hid(adev, &usbio_acpi_match_spis, spi_hids,
 			   ARRAY_SIZE(spi_hids));
 
 	return 0;
@@ -622,7 +620,7 @@ static int usbio_mng_enum_gpio(struct usbio_stub *stub)
 	}
 
 	desc->pins_per_bank = GPIO_PER_BANK;
-	desc->banks = len / sizeof(struct usbio_bank_descriptor);
+	desc->banks = len / sizeof(*desc->bank_desc);
 	ret = usbio_gpio_stub_init(bridge, desc);
 	kfree(desc);
 	if (ret)
@@ -652,13 +650,11 @@ static int usbio_i2c_stub_init(struct usbio_dev *bridge,
 
 		pdata[i].i2c_info.id = desc->info[i].id;
 		pdata[i].i2c_info.capacity = desc->info[i].capacity;
-		pdata[i].i2c_info.intr_pin = desc->info[i].intr_pin;
 
 		cell.name = "usbio-i2c";
 		cell.platform_data = &pdata[i];
 		cell.pdata_size = sizeof(pdata[i]);
-		if (i < ARRAY_SIZE(usbio_acpi_match_i2cs))
-			cell.acpi_match = &usbio_acpi_match_i2cs[i];
+		cell.acpi_match = &usbio_acpi_match_i2cs;
 
 		ret = usbio_add_mfd_cell(bridge, &cell);
 		if (ret)
@@ -679,9 +675,9 @@ static int usbio_mng_enum_i2c(struct usbio_stub *stub)
 	if (!desc)
 		return -ENOMEM;
 
-	ret = usbio_control_xfer(stub, CTRL_ENUM_I2C, NULL, 0, desc, &len, true,
+	ret = usbio_control_xfer(stub, CTRL_ENUM_I2C, NULL, 0, desc->info, &len, true,
 			      USB_ENUM_STUB_TIMEOUT);
-	if (ret) {
+	if (ret || !len || (len % sizeof(*desc->info))) {
 		dev_err(&stub->intf->dev,
 			"CTRL_ENUM_I2C failed ret:%d len:%d num:%d\n", ret, len,
 			desc->num);
@@ -689,6 +685,7 @@ static int usbio_mng_enum_i2c(struct usbio_stub *stub)
 		return -EIO;
 	}
 
+	desc->num = len / sizeof(*desc->info);
 	ret = usbio_i2c_stub_init(bridge, desc);
 	kfree(desc);
 	return ret;
@@ -720,8 +717,7 @@ static int usbio_spi_stub_init(struct usbio_dev *bridge,
 		cell.name = "usbio-spi";
 		cell.platform_data = &pdata[i];
 		cell.pdata_size = sizeof(pdata[i]);
-		if (i < ARRAY_SIZE(usbio_acpi_match_spis))
-			cell.acpi_match = &usbio_acpi_match_spis[i];
+		cell.acpi_match = &usbio_acpi_match_spis;
 
 		ret = usbio_add_mfd_cell(bridge, &cell);
 		if (ret)

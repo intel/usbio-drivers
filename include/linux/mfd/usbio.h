@@ -19,7 +19,6 @@ struct usbio_gpio_info {
 struct usbio_i2c_info {
 	u8 id;
 	u8 capacity;
-	u8 intr_pin;
 };
 
 struct usbio_spi_info {

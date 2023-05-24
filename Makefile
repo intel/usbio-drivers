@@ -7,8 +7,8 @@ usbio-y := drivers/mfd/usbio.o
 obj-m += gpio-usbio.o
 gpio-usbio-y := drivers/gpio/gpio-usbio.o
 
-obj-m += i2c-ljca.o
-i2c-ljca-y := drivers/i2c/busses/i2c-ljca.o
+obj-m += i2c-usbio.o
+i2c-usbio-y := drivers/i2c/busses/i2c-usbio.o
 
 obj-m += spi-ljca.o
 spi-ljca-y := drivers/spi/spi-ljca.o

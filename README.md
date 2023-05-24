@@ -24,12 +24,47 @@ config MFD_USBIO
         help
           This adds support for Intel USBIO (I2C/SPI/GPIO)
           Extension. Additional drivers such as GPIO_USBIO,
-          GPIO_LJCA, etc. must be enabled in order to use the
+          I2C_USBIO, etc. must be enabled in order to use the
           functionality of the device.
 ```
 * add to drivers/mfd/Makefile
 ```
 obj-$(CONFIG_MFD_USBIO) += usbio.o
+```
+
+* Add to drivers/gpio/Kconfig
+```
+config GPIO_USBIO
+        tristate "INTEL USBIO GPIO Extension support"
+        depends on MFD_USBIO
+
+        help
+          Select this option to enable GPIO driver for the INTEL
+          USBIO GPIO Extension.
+
+          This driver can also be built as a module. If so, the module
+          will be called gpio-usbio.
+```
+* Add to drivers/gpio/Makefile
+```
+obj-$(CONFIG_GPIO_USBIO) += gpio-usbio.o
+```
+
+* Add to drivers/i2c/busses/Kconfig
+```
+config I2C_USBIO
+        tristate "INTEL USBIO I2C Extension support"
+        depends on MFD_USBIO
+        help
+         If you say yes to this option, I2C functionality support of INTEL
+         USBIO I2C Extension will be included.
+
+         This driver can also be built as a module.  If so, the module
+         will be called i2c-usbio.
+```
+* Add to drivers/i2c/busses/Makefile
+```
+obj-$(CONFIG_I2C_USBIO) += i2c-usbio.o
 ```
 
 * Add to drivers/spi/Kconfig
@@ -49,46 +84,11 @@ config SPI_LJCA
 obj-$(CONFIG_SPI_LJCA) += spi-ljca.o
 ```
 
-* Add to drivers/gpio/Kconfig
-```
-config GPIO_USBIO
-        tristate "INTEL USBIO GPIO Extension support"
-        depends on MFD_USBIO
-
-        help
-          Select this option to enable GPIO driver for the INTEL
-          USBIO Extension
-
-          This driver can also be built as a module. If so, the module
-          will be called gpio-usbio.
-```
-* Add to drivers/gpio/Makefile
-```
-obj-$(CONFIG_GPIO_USBIO) += gpio-usbio.o
-```
-
-* Add to drivers/i2c/busses/Kconfig
-```
-config I2C_LJCA
-        tristate "I2C functionality of INTEL La Jolla Cove Adapter"
-        depends on MFD_LJCA
-        help
-         If you say yes to this option, I2C functionality support of INTEL
-         La Jolla Cove Adapter (LJCA) will be included.
-
-         This driver can also be built as a module.  If so, the module
-         will be called i2c-ljca.
-```
-* Add to drivers/i2c/busses/Makefile
-```
-obj-$(CONFIG_I2C_LJCA) += i2c-ljca.o
-```
-
 * Enable the following settings in .config
 ```
 CONFIG_MFD_USBIO=m
 CONFIG_GPIO_USBIO=m
-CONFIG_I2C_LJCA=m
+CONFIG_I2C_USBIO=m
 CONFIG_SPI_LJCA=m
 ```
 
