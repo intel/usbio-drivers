@@ -70,15 +70,9 @@ struct fw_version {
 	u16 build;
 } __packed;
 
-struct usbio_i2c_ctr_info {
-	u8 id;
-	u8 capacity;
-	u8 intr_pin;
-} __packed;
-
 struct usbio_i2c_descriptor {
 	u8 num;
-	struct usbio_i2c_ctr_info info[];
+	struct usbio_i2c_info info[];
 } __packed;
 
 struct usbio_spi_ctr_info {

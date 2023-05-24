@@ -416,7 +416,7 @@ static int usbio_i2c_probe(struct platform_device *pdev)
 	usbio_i2c->adap.dev.of_node = pdev->dev.of_node;
 	i2c_set_adapdata(&usbio_i2c->adap, usbio_i2c);
 	snprintf(usbio_i2c->adap.name, sizeof(usbio_i2c->adap.name), "%s-%s-%d",
-		 "ljca-i2c", dev_name(pdev->dev.parent),
+		 "usbio-i2c", dev_name(pdev->dev.parent),
 		 usbio_i2c->ctr_info->id);
 
 	platform_set_drvdata(pdev, usbio_i2c);
@@ -459,6 +459,7 @@ module_platform_driver(usbio_i2c_driver);
 
 MODULE_AUTHOR("Ye Xiang <xiang.ye@intel.com>");
 MODULE_AUTHOR("Zhang Lixu <lixu.zhang@intel.com>");
-MODULE_DESCRIPTION("Intel La Jolla Cove Adapter USB-I2C driver");
+MODULE_AUTHOR("Israel Cepeda <israel.a.cepeda.lopez@intel.com>");
+MODULE_DESCRIPTION("Intel USBIO-I2C driver");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:usb-i2c");
