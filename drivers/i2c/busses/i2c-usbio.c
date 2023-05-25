@@ -15,12 +15,11 @@
 
 /* I2C commands */
 enum i2c_cmd {
-	I2C_INIT = 1,
-	I2C_XFER,
-	I2C_START,
-	I2C_STOP,
+	I2C_DEINIT,
+	I2C_INIT,
 	I2C_READ,
 	I2C_WRITE,
+	I2C_XFER
 };
 
 enum i2c_address_mode {
@@ -28,18 +27,8 @@ enum i2c_address_mode {
 	I2C_ADDRESS_MODE_10BIT,
 };
 
-enum xfer_type {
-	READ_XFER_TYPE,
-	WRITE_XFER_TYPE,
-};
-
-#define DEFAULT_I2C_CONTROLLER_ID 1
-#define DEFAULT_I2C_CAPACITY 0
-#define DEFAULT_I2C_INTR_PIN 0
-
-/* I2C r/w Flags */
-#define I2C_SLAVE_TRANSFER_WRITE (0)
-#define I2C_SLAVE_TRANSFER_READ (1)
+/* Speeds */
+#define I2C_400KHZ 400000
 
 /* i2c init flags */
 #define I2C_INIT_FLAG_MODE_MASK (0x1 << 0)
@@ -53,86 +42,68 @@ enum xfer_type {
 #define I2C_FLAG_FREQ_400K (0x1 << 1)
 #define I2C_FLAG_FREQ_1M (0x2 << 1)
 
-/* I2C Transfer */
-struct i2c_xfer {
+/* I2C init commands: Init/Deinit */
+struct i2c_init_packet {
 	u8 id;
-	u8 slave;
-	u16 flag; /* speed, 8/16bit addr, addr increase, etc */
-	u16 addr;
+	u16 config;
+	u32 speed;
+} __packed;
+
+/* I2C RW commands: Read/Write */
+struct i2c_rw_packet {
+	u8 id;
+	u16 config;
 	u16 len;
 	u8 data[];
 } __packed;
 
-/* I2C raw commands: Init/Start/Read/Write/Stop */
-struct i2c_rw_packet {
+/* I2C Transfer */
+struct i2c_xfer {
 	u8 id;
-	__le16 len;
+	u16 config;
+	u16 wlen;
+	u16 rlen;
 	u8 data[];
 } __packed;
 
-#define LJCA_I2C_MAX_XFER_SIZE 256
-#define LJCA_I2C_BUF_SIZE                                                      \
-	(LJCA_I2C_MAX_XFER_SIZE + sizeof(struct i2c_rw_packet))
+#define USBIO_I2C_MAX_XFER_SIZE 256
+#define USBIO_I2C_BUF_SIZE                                                      \
+	(USBIO_I2C_MAX_XFER_SIZE + sizeof(struct i2c_rw_packet))
 
 struct usbio_i2c_dev {
 	struct platform_device *pdev;
 	struct usbio_i2c_info *ctr_info;
 	struct i2c_adapter adap;
 
-	u8 obuf[LJCA_I2C_BUF_SIZE];
-	u8 ibuf[LJCA_I2C_BUF_SIZE];
+	u8 obuf[USBIO_I2C_BUF_SIZE];
+	u8 ibuf[USBIO_I2C_BUF_SIZE];
 };
 
-static u8 usbio_i2c_format_slave_addr(u8 slave_addr, enum i2c_address_mode mode)
+static u16 usbio_i2c_format_slave_addr(u8 slave_addr, enum i2c_address_mode mode)
 {
 	if (mode == I2C_ADDRESS_MODE_7BIT)
-		return slave_addr << 1;
+		return (u16)slave_addr;
 
 	return 0xFF;
 }
 
-static int usbio_i2c_init(struct usbio_i2c_dev *usbio_i2c, u8 id)
+static int usbio_i2c_start(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr)
 {
-	struct i2c_rw_packet *w_packet = (struct i2c_rw_packet *)usbio_i2c->obuf;
-
-	memset(w_packet, 0, sizeof(*w_packet));
-	w_packet->id = id;
-	w_packet->len = cpu_to_le16(1);
-	w_packet->data[0] = I2C_FLAG_FREQ_400K;
-
-	return usbio_transfer(usbio_i2c->pdev, I2C_INIT, w_packet,
-			     sizeof(*w_packet) + 1, NULL, NULL);
-}
-
-static int usbio_i2c_start(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr,
-			  enum xfer_type type)
-{
-	struct i2c_rw_packet *w_packet = (struct i2c_rw_packet *)usbio_i2c->obuf;
-	struct i2c_rw_packet *r_packet = (struct i2c_rw_packet *)usbio_i2c->ibuf;
+	struct i2c_init_packet *w_packet = (struct i2c_init_packet *)usbio_i2c->obuf;
 	int ret;
-	int ibuf_len;
 
 	memset(w_packet, 0, sizeof(*w_packet));
 	w_packet->id = usbio_i2c->ctr_info->id;
-	w_packet->len = cpu_to_le16(1);
-	w_packet->data[0] =
-		usbio_i2c_format_slave_addr(slave_addr, I2C_ADDRESS_MODE_7BIT);
-	w_packet->data[0] |= (type == READ_XFER_TYPE) ?
-					   I2C_SLAVE_TRANSFER_READ :
-					   I2C_SLAVE_TRANSFER_WRITE;
+	/* TODO: Add support for 10Bit address and multiple speeds */
+	w_packet->config = usbio_i2c_format_slave_addr(slave_addr, I2C_ADDRESS_MODE_7BIT);
+	w_packet->speed = I2C_400KHZ;
 
-	ret = usbio_transfer(usbio_i2c->pdev, I2C_START, w_packet,
-			    sizeof(*w_packet) + 1, r_packet, &ibuf_len);
+	ret = usbio_transfer_noack(usbio_i2c->pdev, I2C_INIT, w_packet,
+			    sizeof(*w_packet));
 
-	if (ret || ibuf_len < sizeof(*r_packet))
-		return -EIO;
-
-	if ((s16)le16_to_cpu(r_packet->len) < 0 ||
-	    r_packet->id != w_packet->id) {
+	if (ret) {
 		dev_err(&usbio_i2c->adap.dev,
-			"i2c start failed len:%d id:%d %d\n",
-			(s16)le16_to_cpu(r_packet->len), r_packet->id,
-			w_packet->id);
+			"i2c start failed ret:%d\n", ret);
 		return -EIO;
 	}
 
@@ -141,46 +112,40 @@ static int usbio_i2c_start(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr,
 
 static int usbio_i2c_stop(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr)
 {
-	struct i2c_rw_packet *w_packet = (struct i2c_rw_packet *)usbio_i2c->obuf;
-	struct i2c_rw_packet *r_packet = (struct i2c_rw_packet *)usbio_i2c->ibuf;
+	struct i2c_init_packet *w_packet = (struct i2c_init_packet *)usbio_i2c->obuf;
 	int ret;
-	int ibuf_len;
 
 	memset(w_packet, 0, sizeof(*w_packet));
 	w_packet->id = usbio_i2c->ctr_info->id;
-	w_packet->len = cpu_to_le16(1);
-	w_packet->data[0] = 0;
+	/* TODO: Add support for 10Bit address */
+	w_packet->config = usbio_i2c_format_slave_addr(slave_addr, I2C_ADDRESS_MODE_7BIT);
 
-	ret = usbio_transfer(usbio_i2c->pdev, I2C_STOP, w_packet,
-			    sizeof(*w_packet) + 1, r_packet, &ibuf_len);
+	ret = usbio_transfer_noack(usbio_i2c->pdev, I2C_DEINIT, w_packet,
+			    sizeof(*w_packet));
 
-	if (ret || ibuf_len < sizeof(*r_packet))
-		return -EIO;
-
-	if ((s16)le16_to_cpu(r_packet->len) < 0 ||
-	    r_packet->id != w_packet->id) {
+	if (ret) {
 		dev_err(&usbio_i2c->adap.dev,
-			"i2c stop failed len:%d id:%d %d\n",
-			(s16)le16_to_cpu(r_packet->len), r_packet->id,
-			w_packet->id);
+			"i2c stop failed ret:%d\n", ret);
 		return -EIO;
 	}
 
 	return 0;
 }
 
-static int usbio_i2c_pure_read(struct usbio_i2c_dev *usbio_i2c, u8 *data, int len)
+static int usbio_i2c_pure_read(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr, u8 *data, int len)
 {
 	struct i2c_rw_packet *w_packet = (struct i2c_rw_packet *)usbio_i2c->obuf;
 	struct i2c_rw_packet *r_packet = (struct i2c_rw_packet *)usbio_i2c->ibuf;
 	int ibuf_len;
 	int ret;
 
-	if (len > LJCA_I2C_MAX_XFER_SIZE)
+	if (len > USBIO_I2C_MAX_XFER_SIZE)
 		return -EINVAL;
 
 	memset(w_packet, 0, sizeof(*w_packet));
 	w_packet->id = usbio_i2c->ctr_info->id;
+	/* TODO: Add support for 10Bit address */
+	w_packet->config = usbio_i2c_format_slave_addr(slave_addr, I2C_ADDRESS_MODE_7BIT);
 	w_packet->len = cpu_to_le16(len);
 	ret = usbio_transfer(usbio_i2c->pdev, I2C_READ, w_packet,
 			    sizeof(*w_packet) + 1, r_packet, &ibuf_len);
@@ -211,11 +176,11 @@ static int usbio_i2c_read(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr, u8 *da
 {
 	int ret;
 
-	ret = usbio_i2c_start(usbio_i2c, slave_addr, READ_XFER_TYPE);
+	ret = usbio_i2c_start(usbio_i2c, slave_addr);
 	if (ret)
 		return ret;
 
-	ret = usbio_i2c_pure_read(usbio_i2c, data, len);
+	ret = usbio_i2c_pure_read(usbio_i2c, slave_addr, data, len);
 	if (ret) {
 		dev_err(&usbio_i2c->adap.dev, "i2c raw read failed ret:%d\n",
 			ret);
@@ -226,18 +191,20 @@ static int usbio_i2c_read(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr, u8 *da
 	return usbio_i2c_stop(usbio_i2c, slave_addr);
 }
 
-static int usbio_i2c_pure_write(struct usbio_i2c_dev *usbio_i2c, u8 *data, u8 len)
+static int usbio_i2c_pure_write(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr, u8 *data, u8 len)
 {
 	struct i2c_rw_packet *w_packet = (struct i2c_rw_packet *)usbio_i2c->obuf;
 	struct i2c_rw_packet *r_packet = (struct i2c_rw_packet *)usbio_i2c->ibuf;
 	int ret;
 	int ibuf_len;
 
-	if (len > LJCA_I2C_MAX_XFER_SIZE)
+	if (len > USBIO_I2C_MAX_XFER_SIZE)
 		return -EINVAL;
 
 	memset(w_packet, 0, sizeof(*w_packet));
 	w_packet->id = usbio_i2c->ctr_info->id;
+	/* TODO: Add support for 10Bit address */
+	w_packet->config = usbio_i2c_format_slave_addr(slave_addr, I2C_ADDRESS_MODE_7BIT);
 	w_packet->len = cpu_to_le16(len);
 	memcpy(w_packet->data, data, len);
 
@@ -268,11 +235,11 @@ static int usbio_i2c_write(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr,
 	if (!data)
 		return -EINVAL;
 
-	ret = usbio_i2c_start(usbio_i2c, slave_addr, WRITE_XFER_TYPE);
+	ret = usbio_i2c_start(usbio_i2c, slave_addr);
 	if (ret)
 		return ret;
 
-	ret = usbio_i2c_pure_write(usbio_i2c, data, len);
+	ret = usbio_i2c_pure_write(usbio_i2c, slave_addr, data, len);
 	if (ret)
 		return ret;
 
@@ -315,8 +282,8 @@ static u32 usbio_i2c_func(struct i2c_adapter *adap)
 }
 
 static const struct i2c_adapter_quirks usbio_i2c_quirks = {
-	.max_read_len = LJCA_I2C_MAX_XFER_SIZE,
-	.max_write_len = LJCA_I2C_MAX_XFER_SIZE,
+	.max_read_len = USBIO_I2C_MAX_XFER_SIZE,
+	.max_write_len = USBIO_I2C_MAX_XFER_SIZE,
 };
 
 static const struct i2c_algorithm usbio_i2c_algo = {
@@ -420,13 +387,6 @@ static int usbio_i2c_probe(struct platform_device *pdev)
 		 usbio_i2c->ctr_info->id);
 
 	platform_set_drvdata(pdev, usbio_i2c);
-
-	ret = usbio_i2c_init(usbio_i2c, usbio_i2c->ctr_info->id);
-	if (ret) {
-		dev_err(&pdev->dev, "i2c init failed id:%d\n",
-			usbio_i2c->ctr_info->id);
-		return -EIO;
-	}
 
 	ret = i2c_add_adapter(&usbio_i2c->adap);
 	if (ret)

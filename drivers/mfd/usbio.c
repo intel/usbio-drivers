@@ -100,7 +100,7 @@ static int precheck_acpi_hid(struct usb_interface *intf)
 
 static bool usbio_validate(void *data, u32 data_len)
 {
-	struct usbio_msg *header = (struct usbio_msg *)data;
+	struct usbio_bmsg *header = (struct usbio_bmsg *)data;
 
 	return (header->len + sizeof(*header) == data_len);
 }
@@ -160,7 +160,7 @@ static void usbio_stub_notify(struct usbio_stub *stub, u8 cmd,
 	spin_unlock_irqrestore(&stub->event_cb_lock, flags);
 }
 
-static int usbio_parse(struct usbio_dev *bridge, struct usbio_msg *header)
+static int usbio_parse(struct usbio_dev *bridge, struct usbio_bmsg *header)
 {
 	struct usbio_stub *stub;
 
@@ -168,7 +168,7 @@ static int usbio_parse(struct usbio_dev *bridge, struct usbio_msg *header)
 	if (IS_ERR(stub))
 		return PTR_ERR(stub);
 
-	if (!(header->flags & ACK_FLAG)) {
+	if (!(header->flags & RESP_FLAG)) {
 		usbio_stub_notify(stub, header->cmd, header->data, header->len);
 		return 0;
 	}
@@ -219,7 +219,7 @@ static int usbio_control_xfer(struct usbio_stub *stub, u8 cmd, const void *obuf,
 	header->len = obuf_len;
 
 	memcpy(header->data, obuf, obuf_len);
-	dev_info(&bridge->intf->dev,
+	dev_dbg(&bridge->intf->dev,
 			"send: type:0x%x cmd:0x%x flags:0x%x len:%d\n",
 			header->type, header->cmd, header->flags, header->len);
 	usbio_dump(bridge, header->data, header->len);
@@ -277,7 +277,7 @@ static int usbio_bulk_write(struct usbio_stub *stub, u8 cmd, const void *obuf,
 			   int obuf_len, void *ibuf, int *ibuf_len,
 			   bool wait_ack, int timeout)
 {
-	struct usbio_msg *header;
+	struct usbio_bmsg *header;
 	struct usbio_dev *bridge = usb_get_intfdata(stub->intf);
 	int ret;
 	u8 flags = CMPL_FLAG;
@@ -303,7 +303,7 @@ static int usbio_bulk_write(struct usbio_stub *stub, u8 cmd, const void *obuf,
 	header->len = obuf_len;
 
 	memcpy(header->data, obuf, obuf_len);
-	dev_dbg(&bridge->intf->dev, "send: type:%d cmd:%d flags:%d len:%d\n",
+	dev_dbg(&bridge->intf->dev, "send: type:0x%x cmd:0x%x flags:0x%x len:%d\n",
 		header->type, header->cmd, header->flags, header->len);
 	usbio_dump(bridge, header->data, header->len);
 
@@ -314,10 +314,10 @@ static int usbio_bulk_write(struct usbio_stub *stub, u8 cmd, const void *obuf,
 	usb_autopm_get_interface(bridge->intf);
 	ret = usb_bulk_msg(bridge->udev,
 			   usb_sndbulkpipe(bridge->udev, bridge->out_ep), header,
-			   sizeof(struct usbio_msg) + obuf_len, &actual,
+			   sizeof(*header) + obuf_len, &actual,
 			   USB_WRITE_TIMEOUT);
 	kfree(header);
-	if (ret || actual != sizeof(struct usbio_msg) + obuf_len) {
+	if (ret || actual != sizeof(*header) + obuf_len) {
 		dev_err(&bridge->intf->dev,
 			"bridge write failed ret:%d total_len:%d\n ", ret,
 			actual);
@@ -365,7 +365,7 @@ static int usbio_transfer_internal(struct platform_device *pdev, u8 cmd,
 	if (IS_ERR(stub))
 		return PTR_ERR(stub);
 
-	if (cmd <= GPIO_STUB)
+	if (stub->type <= GPIO_STUB)
 		return usbio_control_xfer(stub, cmd, obuf, obuf_len,
 			ibuf, ibuf_len,	wait_ack, USB_WRITE_ACK_TIMEOUT);
 	else
@@ -449,7 +449,7 @@ static void usbio_stub_cleanup(struct usbio_dev *bridge)
 static void usbio_read_complete(struct urb *urb)
 {
 	struct usbio_dev *bridge = urb->context;
-	struct usbio_msg *header = urb->transfer_buffer;
+	struct usbio_bmsg *header = urb->transfer_buffer;
 	int len = urb->actual_length;
 	int ret;
 
