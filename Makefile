@@ -10,9 +10,6 @@ gpio-usbio-y := drivers/gpio/gpio-usbio.o
 obj-m += i2c-usbio.o
 i2c-usbio-y := drivers/i2c/busses/i2c-usbio.o
 
-obj-m += spi-ljca.o
-spi-ljca-y := drivers/spi/spi-ljca.o
-
 KERNELRELEASE ?= $(shell uname -r)
 KERNEL_SRC ?= /lib/modules/$(KERNELRELEASE)/build
 PWD := $(shell pwd)
