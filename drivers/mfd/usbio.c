@@ -1130,11 +1130,8 @@ static int usbio_resume(struct usb_interface *intf)
 }
 
 static const struct usb_device_id usbio_table[] = {
-	{USB_DEVICE(0x2AC1, 0x20C0)}, /* Lattice NX40 */
 	{USB_DEVICE(0x2AC1, 0x20C1)}, /* Lattice NX40 */
-	{USB_DEVICE(0x2AC1, 0x20C8)}, /* Lattice NX33 */
 	{USB_DEVICE(0x2AC1, 0x20C9)}, /* Lattice NX33 */
-	{USB_DEVICE(0x2AC1, 0x20CA)}, /* Lattice NX33U */
 	{USB_DEVICE(0x2AC1, 0x20CB)}, /* Lattice NX33U */
 	{}
 };
