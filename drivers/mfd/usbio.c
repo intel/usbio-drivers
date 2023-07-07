@@ -21,6 +21,9 @@
 
 #include "bridge.h"
 
+
+#define USBIO_VERSION "1.1"
+
 static char *gpio_hids[] = {
 	"INTC1074", /* TGL */
 	"INTC1096", /* ADL */
@@ -931,7 +934,7 @@ static ssize_t cmd_store(struct device *dev, struct device_attribute *attr,
 static ssize_t cmd_show(struct device *dev, struct device_attribute *attr,
 			char *buf)
 {
-	return sysfs_emit(buf, "%s\n", "supported cmd: [dfu, reset, debug]");
+	return sysfs_emit(buf, "%s\n", "supported cmd: [reset, debug]");
 }
 static DEVICE_ATTR_RW(cmd);
 
@@ -952,6 +955,7 @@ static ssize_t log_show(struct device *dev, struct device_attribute *attr,
 	struct usb_interface *intf = to_usb_interface(dev);
 	struct usbio_dev *bridge = usb_get_intfdata(intf);
 	struct usbio_stub *diag_stub = usbio_stub_find(bridge, DIAG_STUB);
+	memcpy(buf, "USBIO log: TBD\n", 15);
 
 	return usbio_diag_get_fw_log(diag_stub, buf);
 }
@@ -1126,8 +1130,9 @@ static int usbio_resume(struct usb_interface *intf)
 }
 
 static const struct usb_device_id usbio_table[] = {
-	{USB_DEVICE(0x2AC1, 0x20C0)}, /* Lattice NX40 */
-	{USB_DEVICE(0x2AC1, 0x20C9)}, /* Lattice NX33U */
+	{USB_DEVICE(0x2AC1, 0x20C1)}, /* Lattice NX40 */
+	{USB_DEVICE(0x2AC1, 0x20C9)}, /* Lattice NX33 */
+	{USB_DEVICE(0x2AC1, 0x20CB)}, /* Lattice NX33U */
 	{}
 };
 MODULE_DEVICE_TABLE(usb, usbio_table);
@@ -1148,5 +1153,7 @@ module_usb_driver(usbbridge_driver);
 MODULE_AUTHOR("Ye Xiang <xiang.ye@intel.com>");
 MODULE_AUTHOR("Zhang Lixu <lixu.zhang@intel.com>");
 MODULE_AUTHOR("Israel Cepeda <israel.a.cepeda.lopez@intel.com>");
+MODULE_AUTHOR("Lifu Wang <lifu.wang@intel.com>");
 MODULE_DESCRIPTION("Intel USBIO Bridge driver");
+MODULE_VERSION(USBIO_VERSION);
 MODULE_LICENSE("GPL v2");
