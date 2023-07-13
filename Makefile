@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (c) 2023 Intel Corporation.
 
+ifeq ($(KERN_VER),$(EMPTY_STR))
+KERNELRELEASE ?= $(shell uname -r)
+else
+KERNELRELEASE ?= $(KERN_VER)
+endif
+
 obj-m += usbio.o
 usbio-y := drivers/mfd/usbio.o
 
