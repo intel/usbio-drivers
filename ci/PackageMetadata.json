@@ -1,0 +1,13 @@
+{
+    "metaDataSchemaVersion" : "1.0",
+    "packageRevision" : 0,
+    "name" : "USBIO",
+    "version" : "${IngredientVersion}",
+    "isEngineering" : false,
+    "metaDataComponents" : [
+        {
+            "files" : [ "" ],
+            "type" : ""
+        }
+    ]
+}
