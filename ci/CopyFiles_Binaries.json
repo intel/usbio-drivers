@@ -1,0 +1,7 @@
+{
+  "linux": {
+    "files": {
+      "linux/bin": ["usbio.ko", "gpio-usbio.ko","i2c-usbio.ko"]
+    }
+  }
+}
