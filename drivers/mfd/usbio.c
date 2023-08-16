@@ -270,7 +270,10 @@ static int usbio_control_xfer(struct usbio_stub *stub, u8 cmd, const void *obuf,
 	stub->ipacket.ibuf = NULL;
 	stub->ipacket.ibuf_len = 0;
 error:
-	kfree(header);
+	if(header) {
+		kfree(header);
+	}
+
 	usb_autopm_put_interface(bridge->intf);
 	mutex_unlock(&bridge->mutex);
 	return ret;

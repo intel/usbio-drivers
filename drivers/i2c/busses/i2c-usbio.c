@@ -191,7 +191,7 @@ static int usbio_i2c_read(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr, u8 *da
 	return usbio_i2c_stop(usbio_i2c, slave_addr);
 }
 
-static int usbio_i2c_pure_write(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr, u8 *data, u8 len)
+static int usbio_i2c_pure_write(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr, u8 *data, int len)
 {
 	struct i2c_rw_packet *w_packet = (struct i2c_rw_packet *)usbio_i2c->obuf;
 	struct i2c_rw_packet *r_packet = (struct i2c_rw_packet *)usbio_i2c->ibuf;
