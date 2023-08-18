@@ -243,6 +243,7 @@ static int usbio_control_xfer(struct usbio_stub *stub, u8 cmd, const void *obuf,
 	}
 
 	kfree(header);
+	header = NULL;
 	if (wait_ack) {
 		actual = bridge->cbuf_len;
 		header = kmalloc(actual, GFP_KERNEL);
@@ -272,6 +273,7 @@ static int usbio_control_xfer(struct usbio_stub *stub, u8 cmd, const void *obuf,
 error:
 	if(header) {
 		kfree(header);
+		header = NULL;
 	}
 
 	usb_autopm_put_interface(bridge->intf);
