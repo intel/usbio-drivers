@@ -1,5 +1,5 @@
 #!groovy
-@Library(['owmCommon@2.6.0', "abi_central"]) _
+@Library(['owmCommon@2.7.0', "abi_central"]) _
 
 //Useful for private branche where you just want to compile and test the output
 //Master/Develop these should be set to false to SS/IpScan always execute
