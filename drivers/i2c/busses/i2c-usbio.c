@@ -417,9 +417,10 @@ static struct platform_driver usbio_i2c_driver = {
 
 module_platform_driver(usbio_i2c_driver);
 
+MODULE_AUTHOR("Lifu Wang <lifu.wang@intel.com>");
 MODULE_AUTHOR("Ye Xiang <xiang.ye@intel.com>");
 MODULE_AUTHOR("Zhang Lixu <lixu.zhang@intel.com>");
 MODULE_AUTHOR("Israel Cepeda <israel.a.cepeda.lopez@intel.com>");
 MODULE_DESCRIPTION("Intel USBIO-I2C driver");
 MODULE_LICENSE("GPL v2");
-MODULE_ALIAS("platform:usb-i2c");
+MODULE_ALIAS("platform:usbio-i2c");
