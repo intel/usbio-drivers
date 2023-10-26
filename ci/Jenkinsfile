@@ -155,13 +155,12 @@ pipeline {
       }
       when {
         anyOf{
-          // expression{ BRANCH_NAME ==~ /(usbio-main)/ }
+          expression{ BRANCH_NAME ==~ /(usbio-main)/ }
           expression{ params.RUN_PROTEX }
           expression{ params.RUN_BDBA }
           expression{ params.RUN_VIRUS }
           expression{ params.RUN_SSCB }
           expression{ params.RUN_COVERITY }
-          expression{ params.PROCESS_BOM }
         }
         beforeAgent true
       }
@@ -171,9 +170,6 @@ pipeline {
             abi_init config: "ci/BuildConfig.json"
             def ingWorkspace = abi_workspace_get()
             abi_stash_pull packagePattern: "BuildBin-*"
-            if(params.PROCESS_BOM) {
-              ProcessBomData()
-            }
             dir (ingWorkspace) {
               def comp_scans = []
               if (params.RUN_COVERITY || BRANCH_NAME ==~ /(usbio-main)/) {
@@ -195,6 +191,32 @@ pipeline {
         }
       }
     } // end: ABI Central Scan stage
+
+    stage ("Process BOM") {
+      when {
+        beforeAgent true
+        anyOf {
+          // expression{BRANCH_NAME ==~ /(usbio-main)/}
+          expression { params.PROCESS_BOM == true }
+        }
+      }
+      agent {
+        node {
+          label agentLabel
+          customWorkspace agentWorkspace
+        }
+      }
+      steps {
+        script {
+          abi_init config: "IDF/BuildConfig.json"
+
+          // Download scan reports (Protex and/or BDBA is required)
+          abi_stash_pull packagePattern: "BuildBin-CentralScan"
+
+          ProcessBomData()
+        }
+      }
+    }
 
     stage('Create Package and Upload To Artifactory'){
       agent {
