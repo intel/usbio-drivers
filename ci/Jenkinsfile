@@ -201,9 +201,12 @@ pipeline {
         }
       }
       agent {
-        node {
-          label agentLabel
-          customWorkspace agentWorkspace
+        kubernetes {
+          cloud cloudNamelinux
+          slaveConnectTimeout "300000"
+          yaml podDefinitionYamlLinux
+          customWorkspace agentWorkspaceLinux
+          defaultContainer containerNameLinux
         }
       }
       steps {
