@@ -217,9 +217,9 @@ pipeline {
           abi_stash_pull packagePattern: "BuildBin-CentralScan"
 
           sh """
-            ls /home/jenkins/agent/workspace/usbio/src
-            ls /home/jenkins/agent/workspace/usbio/src/OWRBin
-            ls /home/jenkins/agent/workspace/usbio/src/OWRBin/Documents
+            ls /home/jenkins/agent/workspace/usbio/Src
+            ls /home/jenkins/agent/workspace/usbio/Src/OWRBin
+            ls /home/jenkins/agent/workspace/usbio/Src/OWRBin/Documents
           """
 
           ProcessBomData()
