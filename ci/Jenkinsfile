@@ -216,6 +216,11 @@ pipeline {
           // Download scan reports (Protex and/or BDBA is required)
           abi_stash_pull packagePattern: "BuildBin-CentralScan"
 
+          sh """
+            ls home/jenkins/agent/workspace/
+            ls home/jenkins/agent/workspace/usbio/
+          """
+
           ProcessBomData()
         }
       }
