@@ -211,7 +211,7 @@ pipeline {
       }
       steps {
         script {
-          abi_init config: "IDF/BuildConfig.json"
+          abi_init config: "ci/BuildConfig.json"
 
           // Download scan reports (Protex and/or BDBA is required)
           abi_stash_pull packagePattern: "BuildBin-CentralScan"
