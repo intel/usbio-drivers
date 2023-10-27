@@ -216,6 +216,11 @@ pipeline {
           // Download scan reports (Protex and/or BDBA is required)
           abi_stash_pull packagePattern: "BuildBin-CentralScan"
 
+          sh """
+            pwd
+            ls -l
+          """
+
           ProcessBomData()
         }
       }
@@ -284,6 +289,6 @@ void ProcessBomData() {
 }
 
 def GetFileList(String filePattern) {
-  fileList = (findFiles(glob: "**/${filePattern}").collect { "${WORKSPACE}" + '/' + it.path }).join(',')
+  fileList = (findFiles(glob: "**/Src/OWRBin/Documents/${filePattern}").collect { "${WORKSPACE}" + '/' + it.path }).join(',')
   return fileList
 }
