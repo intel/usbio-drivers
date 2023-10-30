@@ -187,8 +187,7 @@ pipeline {
               selective_scan: SELECTIVE_SCAN
             }
           }
-          ReadyBomData()
-          abi_stash_push packageName: "BuildBin-CentralScan", pattern: "OWRBin"
+          abi_stash_push packageName: "BuildBin-CentralScan", pattern: "OWRBin/Documents"
         }
       }
     } // end: ABI Central Scan stage
@@ -263,10 +262,6 @@ pipeline {
     }
   }
 } //end pipeline
-
-void ReadyBomData() {
-  sh "rm -rf Src/OWRBin/Documents/Linux"
-}
 
 void ProcessBomData() {
   def bdbaReportPattern = "*-components.csv"
