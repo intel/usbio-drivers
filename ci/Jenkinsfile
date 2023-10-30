@@ -289,6 +289,6 @@ void ProcessBomData() {
 }
 
 def GetFileList(String filePattern) {
-  fileList = (findFiles(glob: "**/Src/OWRBin/Documents/${filePattern}").collect { "${WORKSPACE}" + '/' + it.path }).join(',')
+  fileList = (findFiles(glob: "**/${filePattern}").collect { "${WORKSPACE}" + '/' + it.path }).join(',')
   return fileList
 }
