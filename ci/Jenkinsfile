@@ -187,7 +187,7 @@ pipeline {
               selective_scan: SELECTIVE_SCAN
             }
           }
-          abi_stash_push packageName: "BuildBin-CentralScan", pattern: "OWRBin"
+          abi_stash_push packageName: "BuildBin-CentralScan", pattern: "OWRBin/Documents"
         }
       }
     } // end: ABI Central Scan stage
@@ -214,7 +214,7 @@ pipeline {
           abi_init config: "ci/BuildConfig.json"
 
           // Download scan reports (Protex and/or BDBA is required)
-          abi_stash_pull packagePattern: "BuildBin-CentralScan"
+          abi_stash_pull packagePattern: "BuildBin-*"
 
           ProcessBomData()
         }
