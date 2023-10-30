@@ -187,7 +187,7 @@ pipeline {
               selective_scan: SELECTIVE_SCAN
             }
           }
-          abi_stash_push packageName: "BuildBin-CentralScan", pattern: "OWRBin/Documents"
+          abi_stash_push packageName: "BuildBin-CentralScan", pattern: "OWRBin"
         }
       }
     } // end: ABI Central Scan stage
