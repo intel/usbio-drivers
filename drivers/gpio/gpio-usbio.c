@@ -489,8 +489,9 @@ static struct platform_driver usbio_gpio_driver = {
 
 module_platform_driver(usbio_gpio_driver);
 
+MODULE_AUTHOR("Lifu Wang <lifu.wang@intel.com>");
 MODULE_AUTHOR("Zhang Lixu <lixu.zhang@intel.com>");
 MODULE_AUTHOR("Israel Cepeda <israel.a.cepeda.lopez@intel.com>");
 MODULE_DESCRIPTION("Intel USBIO-GPIO driver");
 MODULE_LICENSE("GPL v2");
-MODULE_ALIAS("platform:usb-gpio");
+MODULE_ALIAS("platform:usbio-gpio");

@@ -1,0 +1,122 @@
+FROM amr-registry.caas.intel.com/owr/ubuntu:22.04
+
+ENV http_proxy http://proxy-dmz.intel.com:912
+ENV https_proxy http://proxy-dmz.intel.com:912
+ENV no_proxy localhost,.intel.com,intel.com,127.0.0.0/8,172.16.0.0/20,192.168.0.0/16,10.0.0.0/8
+ENV DEBIAN_FRONTEND noninteractive
+
+ENV LC_ALL C.UTF-8
+ENV LANG C.UTF-8
+
+# Setup Intel's mirrors
+# ADD VSCode Remote Debug Dependencies
+# Install git, python, process tools, lsb-release (common in install instructions for CLIs), Install any missing dependencies for enhanced language service
+RUN sed -i 's@archive.ubuntu.com@linux-ftp.intel.com/pub/mirrors@' /etc/apt/sources.list \
+    && sed -i 's@security.ubuntu.com@linux-ftp.intel.com/pub/mirrors@' /etc/apt/sources.list \
+    && apt-get update \
+    && apt-get -y install --no-install-recommends apt-utils 2>&1 \
+    && apt-get -y install \
+    cmake \
+    git \
+    git-lfs \
+    lib32tinfo6 \
+    libicu[0-9][0-9] \
+    lsb-release \
+    net-tools \
+    ninja-build \
+    openjdk-8-jdk \
+    make \
+    p7zip-full \
+    procps \
+    python3 \
+    python3-pip \
+    python3-venv \
+    wget \
+    curl \
+    rsync \
+    iputils-ping \
+    --fix-missing \
+    && DEBIAN_FRONTEND=noninteractive apt-get -y install \
+    gcc \
+    libkrb5-dev \
+    krb5-user \
+    zip \
+    unzip \
+    vim \
+    dos2unix \
+    sudo \
+    clamav \
+    gss-ntlmssp \
+    rpm2cpio \
+    cpio \
+    cabextract \
+    && python3 -m pip install --upgrade setuptools pip \
+    && wget http://security.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb && dpkg -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb && rm libssl1.1_1.1.1f-1ubuntu2_amd64.deb \
+    && sed -i 's/openssl_conf = openssl_init/#openssl_conf = openssl_init/g' /etc/ssl/openssl.cnf \
+    && apt-get autoremove -y \
+    && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# ingredient required 
+RUN apt-get update \
+    && apt-get install build-essential \
+    && apt-get install -y linux-headers-5.19.0-46-generic
+
+# Install wit after COPY, so that it re-runs everytime
+RUN mkdir -p /OWR \
+    && mkdir -p /OWR/Tools \
+    && wget -nv -O /OWR/Tools/wit http://goto.intel.com/wit-launcher-linux \
+    && chmod +x /OWR/Tools/wit \
+    && /OWR/Tools/wit --version-number \
+    && rm /tmp/.wit/version.txt
+
+ENV PATH "${PATH}:/OWR:/OWR/Tools"
+ENV DEBIAN_FRONTEND=dialog
+
+# Create a conf file to re-enable Ubuntu 20.04 deprecated insecure algorithms
+RUN echo "KexAlgorithms diffie-hellman-group-exchange-sha1,diffie-hellman-group14-sha1,diffie-hellman-group1-sha1" >>/etc/ssh/ssh_config.d/weak.conf
+
+# Copy the .gitconfig and .netrc files to the /root directory
+COPY --chown=root .ssh/.gitconfig /root/.gitconfig
+COPY --chown=root .ssh/_netrc /root/.netrc
+
+# Copy the .gitconfig and .netrc files to the /OWR/Git directory
+COPY --chown=root .ssh/.gitconfig /OWR/Git/.gitconfig
+COPY --chown=root .ssh/_netrc /OWR/Git/.netrc
+
+# Install Protex 7.8.4
+RUN wget -nv -P /tmp http://owrdropbox.intel.com/dropbox/public/Ansible/Protex/7.8.4/protex-client-7.8.4_linux-x64.tar.gz \
+    && tar -C /OWR/Tools -xzf /tmp/protex-client-7.8.4_linux-x64.tar.gz \
+    && mv /OWR/Tools/protexIP /OWR/Tools/protexIP-7.8.4 \
+    && rm /tmp/protex-client-7.8.4_linux-x64.tar.gz
+
+# Install Coverity
+RUN wget -nv -P /tmp https://ubit-artifactory-or.intel.com/artifactory/coverity-or-local/Enterprise/cov-analysis-linux64-2023.3.4.sh \
+    && wget -nv -P /tmp https://ubit-artifactory-or.intel.com/artifactory/coverity-or-local/Enterprise/license.dat
+RUN chmod +x /tmp/cov-analysis-linux64-2023.3.4.sh \
+&& /tmp/cov-analysis-linux64-2023.3.4.sh \
+    --installation.dir=/OWR/Tools/coverity/2023.3.4/ \
+    --license.agreement=agree \
+    --license.cov.path=/tmp/license.dat \
+    --license.region=0 \
+    --license.type.choice=0 \
+    --component.sdk=false \
+    # NOTE: Be careful, if any characters are changed below you risk the nonsensical error:
+    #   The boolean argument --component.skip.documentation had value true.
+    #   The value should be either true or false.
+    --component.skip.documentation=true -q \
+&& rm -f /tmp/cov-analysis-linux64-2023.3.4.sh
+
+# Install Coverity Reports
+RUN wget -nv -P /tmp https://ubit-artifactory-or.intel.com/artifactory/coverity-or-local/Enterprise/reports_installers/cov-reports-linux64-2023.3.4.sh
+RUN chmod +x /tmp/cov-reports-linux64-2023.3.4.sh \
+&& /tmp/cov-reports-linux64-2023.3.4.sh \
+    -q -console -dir /OWR/Tools/cov_report/2023.3.4
+ENV PATH "${PATH}:/OWR/Tools/cov_report/2023.3.4/bin"
+
+# Fix for dubious ownership git error
+RUN git config --system --add safe.directory '*'
+
+# build me: docker build -t amr-registry.caas.intel.com/owr/ingredient/usbio/linux/agent:1.0 -f ci/Dockerfile.linux .
+# run me:   docker run -it amr-registry.caas.intel.com/owr/ingredient/usbio/linux/agent:1.0
+# push me:  docker push amr-registry.caas.intel.com/owr/ingredient/usbio/linux/agent:1.0
