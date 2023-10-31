@@ -196,7 +196,7 @@ pipeline {
       when {
         beforeAgent true
         anyOf {
-          // expression{BRANCH_NAME ==~ /(usbio-main)/}
+          expression{BRANCH_NAME ==~ /(usbio-main)/}
           expression { params.PROCESS_BOM == true }
         }
       }
