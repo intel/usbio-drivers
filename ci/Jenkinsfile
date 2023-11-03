@@ -49,6 +49,7 @@ pipeline {
     booleanParam(name:'RUN_BDBA', defaultValue: false, description:'Enable to run BDBA scan')
     booleanParam(name:'RUN_SSCB', defaultValue: false, description:'Enable to run SSCB scan')
     booleanParam(name:'SUBMIT_TO_SDLE', defaultValue: false, description: 'Enables SDLE Evidence Upload and SDLE Task updates for completed scans')
+    booleanParam(name:'PROCESS_BOM', defaultValue: false, description:'Process BOM Data and update IPX database')
   }
 
   options {
@@ -191,6 +192,35 @@ pipeline {
       }
     } // end: ABI Central Scan stage
 
+    stage ("Process BOM") {
+      when {
+        beforeAgent true
+        anyOf {
+          expression{BRANCH_NAME ==~ /(usbio-main)/}
+          expression { params.PROCESS_BOM == true }
+        }
+      }
+      agent {
+        kubernetes {
+          cloud cloudNamelinux
+          slaveConnectTimeout "300000"
+          yaml podDefinitionYamlLinux
+          customWorkspace agentWorkspaceLinux
+          defaultContainer containerNameLinux
+        }
+      }
+      steps {
+        script {
+          abi_init config: "ci/BuildConfig.json"
+
+          // Download scan reports (Protex and/or BDBA is required)
+          abi_stash_pull packagePattern: "BuildBin-*"
+
+          ProcessBomData()
+        }
+      }
+    }
+
     stage('Create Package and Upload To Artifactory'){
       agent {
         kubernetes {
@@ -232,3 +262,28 @@ pipeline {
     }
   }
 } //end pipeline
+
+void ProcessBomData() {
+  def bdbaReportPattern = "*-components.csv"
+  def protexReportPattern = "COS_*.xlsx"
+  catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+    def ctx = abi_get_current_context()
+    oneBomRepoPath = "${ctx['DeployCustomServer']}/artifactory/${ctx['DeployCustomPath']}/${ctx['IngredientName']}/${ctx['IngredientVersion']}"
+    def argList = [ignore_errors: true, debug: true, repo: oneBomRepoPath]
+    def componentlist = GetFileList(bdbaReportPattern)
+    def workbooklist = GetFileList(protexReportPattern)
+    if ( componentlist ) { argList.component_list = componentlist }
+    if ( workbooklist ) { argList.workbook_list = workbooklist }
+    if ( componentlist || workbooklist ) { abi_one_bom argList }
+    else
+    {
+      log.Error ("No component Reports found, Please verify if either your BDBA Scan or Protex Scan was executed as part of this Job")
+      error("\n")
+    }
+  }
+}
+
+def GetFileList(String filePattern) {
+  fileList = (findFiles(glob: "**/${filePattern}").collect { "${WORKSPACE}" + '/' + it.path }).join(',')
+  return fileList
+}
