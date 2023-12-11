@@ -18,8 +18,6 @@
 #include <linux/types.h>
 #include <linux/bitops.h>
 
-#define GPIO_PAYLOAD_LEN(packet, pin)	(sizeof(*packet) + (pin))
-
 /* GPIO commands */
 #define GPIO_DEINIT 0
 #define GPIO_INIT 1
@@ -108,7 +106,7 @@ static int gpio_config(struct usbio_gpio_dev *usbio_gpio, u8 gpio_id, u8 config)
 	packet->pins = gpio_id % GPIO_PER_BANK;
 
 	ret = usbio_transfer(usbio_gpio->pdev, GPIO_INIT, packet,
-			    GPIO_PAYLOAD_LEN(packet, packet->pins), NULL, NULL);
+			    sizeof(*packet), NULL, NULL);
 	mutex_unlock(&usbio_gpio->trans_lock);
 	return ret;
 }
@@ -128,8 +126,7 @@ static int usbio_gpio_read(struct usbio_gpio_dev *usbio_gpio, u8 gpio_id)
 	packet->pincount = 1;
 	packet->pins = gpio_id % GPIO_PER_BANK;
 	ret = usbio_transfer(usbio_gpio->pdev, GPIO_READ, packet,
-			    GPIO_PAYLOAD_LEN(packet, packet->pins),
-			    usbio_gpio->ibuf, &ibuf_len);
+			    sizeof(*packet), usbio_gpio->ibuf, &ibuf_len);
 
 	ack_packet = (struct gpio_rw_packet *)usbio_gpio->ibuf;
 	if (ret || !ibuf_len || ack_packet->pins != packet->pins) {
@@ -156,7 +153,7 @@ static int usbio_gpio_write(struct usbio_gpio_dev *usbio_gpio, u8 gpio_id,
 	packet->value = value << packet->pins;
 
 	ret = usbio_transfer(usbio_gpio->pdev, GPIO_WRITE, packet,
-			    GPIO_PAYLOAD_LEN(packet, packet->pins), NULL, NULL);
+			    sizeof(*packet), NULL, NULL);
 	if (ret) {
 		dev_err(&usbio_gpio->pdev->dev, "%s failed gpio_id:%d ret %d\n",
 			__func__, gpio_id, ret);
@@ -172,6 +169,7 @@ static int usbio_gpio_get_value(struct gpio_chip *chip, unsigned int offset)
 {
 	struct usbio_gpio_dev *usbio_gpio = gpiochip_get_data(chip);
 
+	dev_dbg(chip->parent, "%s: offset %d\n", __func__, offset);
 	return usbio_gpio_read(usbio_gpio, offset);
 }
 
@@ -181,6 +179,7 @@ static void usbio_gpio_set_value(struct gpio_chip *chip, unsigned int offset,
 	struct usbio_gpio_dev *usbio_gpio = gpiochip_get_data(chip);
 	int ret;
 
+	dev_dbg(chip->parent, "%s: offset %d val %d\n", __func__, offset, val);
 	ret = usbio_gpio_write(usbio_gpio, offset, val);
 	if (ret)
 		dev_err(chip->parent,
@@ -255,7 +254,7 @@ static int usbio_enable_irq(struct usbio_gpio_dev *usbio_gpio, int gpio_id,
 
 	ret = usbio_transfer(usbio_gpio->pdev,
 			    enable == true ? GPIO_INT_UNMASK : GPIO_INT_MASK,
-			    packet, GPIO_PAYLOAD_LEN(packet, packet->pins), NULL, NULL);
+			    packet, sizeof(*packet), NULL, NULL);
 	mutex_unlock(&usbio_gpio->trans_lock);
 	return ret;
 }
