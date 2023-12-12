@@ -175,7 +175,11 @@ static int usbio_parse(struct usbio_dev *bridge, struct usbio_bmsg *header)
 		usbio_stub_notify(stub, header->cmd, header->data, header->len);
 		return 0;
 	}
-
+	if (header->flags & ERR_FLAG) {
+		dev_err(&bridge->intf->dev, "header->cmd %x flag %x (ERR_FLAG)",
+			 header->cmd, header->flags);
+		return -EINVAL;
+	}
 	if (stub->cur_cmd != header->cmd) {
 		dev_err(&bridge->intf->dev, "header->cmd:%x != stub->cur_cmd:%x",
 			header->cmd, stub->cur_cmd);
@@ -375,7 +379,7 @@ static int usbio_transfer_internal(struct platform_device *pdev, u8 cmd,
 
 	if (stub->type <= GPIO_STUB)
 		return usbio_control_xfer(stub, cmd, obuf, obuf_len,
-			ibuf, ibuf_len,	wait_ack, USB_WRITE_ACK_TIMEOUT);
+			ibuf, ibuf_len,	false, USB_WRITE_ACK_TIMEOUT);
 	else
 		return usbio_bulk_write(stub, cmd, obuf, obuf_len,
 			ibuf, ibuf_len,	wait_ack, USB_WRITE_ACK_TIMEOUT);
