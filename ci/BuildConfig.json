@@ -45,5 +45,11 @@
   "Protex":{
       "Server": "gerprotex012.devtools.intel.com",
       "ProjectID": "c_usbio_32653"
+  },
+  "OneBom": {
+    "IngredientLibrary": "drivers_platform",
+    "IngredientRepo": "",
+    "ignore": "",
+    "ipx_name": "lch_linux-usbio_src"
   }
 }
