@@ -175,10 +175,14 @@ static int usbio_parse(struct usbio_dev *bridge, struct usbio_bmsg *header)
 		usbio_stub_notify(stub, header->cmd, header->data, header->len);
 		return 0;
 	}
-
 	if (stub->cur_cmd != header->cmd) {
 		dev_err(&bridge->intf->dev, "header->cmd:%x != stub->cur_cmd:%x",
 			header->cmd, stub->cur_cmd);
+		return -EINVAL;
+	}
+	if (header->flags & ERR_FLAG) {
+		dev_err(&bridge->intf->dev, "header->cmd %x flag %x (ERR_FLAG)",
+			 header->cmd, header->flags);
 		return -EINVAL;
 	}
 
