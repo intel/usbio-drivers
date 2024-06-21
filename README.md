@@ -1,6 +1,6 @@
 # usbio driver stack
 
-This repository supports USBIO Extension drivers on Intel Alder Lake platforms.
+This repository supports USBIO Extension drivers on Intel Alder Lake, Raptor Lake, Meteor Lake and Lunar Lake platforms.
 
 
 ## Build instructions:
@@ -10,7 +10,7 @@ Three ways are available:
   3. build with dkms
 
 ### build with kernel source tree
-* Tested with kernel 5.19
+* Tested with kernel 6.8
 * Check out kernel
 * Copy repo content to kernel source
 * Modify related Kconfig and Makefile

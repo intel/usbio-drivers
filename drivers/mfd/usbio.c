@@ -26,6 +26,7 @@ static char *gpio_hids[] = {
 	"INTC1096", /* ADL */
 	"INTC100B", /* RPL */
 	"INTC10D1", /* MTL */
+	"INTC10B5", /* LNL */
 };
 static struct mfd_cell_acpi_match usbio_acpi_match_gpio;
 
@@ -34,6 +35,7 @@ static char *i2c_hids[] = {
 	"INTC1097", /* ADL */
 	"INTC100C", /* RPL */
 	"INTC10D2", /* MTL */
+	"INTC10B6", /* LNL */
 };
 static struct mfd_cell_acpi_match usbio_acpi_match_i2cs;
 
@@ -53,7 +55,7 @@ static int try_match_acpi_hid(struct acpi_device *child,
 	int i;
 
 	for (i = 0; i < hids_num; i++) {
-		strlcpy(ids[0].id, hids[i], sizeof(ids[0].id));
+		strscpy(ids[0].id, hids[i], sizeof(ids[0].id));
 		if (!acpi_match_device_ids(child, ids)) {
 			match->pnpid = hids[i];
 			break;
