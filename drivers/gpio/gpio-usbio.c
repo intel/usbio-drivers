@@ -18,7 +18,7 @@
 #include <linux/types.h>
 #include <linux/bitops.h>
 
-#define GPIO_PAYLOAD_LEN(packet, pin)	(sizeof(*packet) + (pin))
+#define GPIO_PAYLOAD_LEN(packet, pin)	(sizeof(*packet))
 
 /* GPIO commands */
 #define GPIO_DEINIT 0
