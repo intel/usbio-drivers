@@ -12,6 +12,7 @@
 #include <linux/kernel.h>
 #include <linux/kref.h>
 #include <linux/mfd/usbio.h>
+#include <linux/mfd/core.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
@@ -127,9 +128,22 @@ static int usbio_gpio_read(struct usbio_gpio_dev *usbio_gpio, u8 gpio_id)
 	packet->bankid = gpio_id / GPIO_PER_BANK;
 	packet->pincount = 1;
 	packet->pins = gpio_id % GPIO_PER_BANK;
-	ret = usbio_transfer(usbio_gpio->pdev, GPIO_READ, packet,
+
+	/*
+	 * for GPIO_READ, the [u32 value;] field in gpio_rw_packet is not used
+	 * Therefore, reduce the payload length by 4 bytes.
+	 */
+
+	if (usbio_gpio->pdev->mfd_cell &&
+	    is_gpio_hid_v1_0(usbio_gpio->pdev->mfd_cell->acpi_match->pnpid)) {
+		ret = usbio_transfer(usbio_gpio->pdev, GPIO_READ, packet,
+			    GPIO_PAYLOAD_LEN(packet, packet->pins) - sizeof(u32),
+			    usbio_gpio->ibuf, &ibuf_len);
+	} else {
+		ret = usbio_transfer(usbio_gpio->pdev, GPIO_READ, packet,
 			    GPIO_PAYLOAD_LEN(packet, packet->pins),
 			    usbio_gpio->ibuf, &ibuf_len);
+	}
 
 	ack_packet = (struct gpio_rw_packet *)usbio_gpio->ibuf;
 	if (ret || !ibuf_len || ack_packet->pins != packet->pins) {
