@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /*
- * Intel USBIO-Bridge driver
  *
  * Copyright (c) 2023, Intel Corporation.
  */
