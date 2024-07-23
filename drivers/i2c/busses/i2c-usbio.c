@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /*
- * Intel USBIO-I2C driver
- *
+ * 
  * Copyright (c) 2023, Intel Corporation.
  */
 
