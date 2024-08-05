@@ -35,6 +35,8 @@ struct usbio_platform_data {
 	};
 };
 
+extern char *gpio_hids[];
+
 typedef void (*usbio_event_cb_t)(struct platform_device *pdev, u8 cmd,
 				const void *evt_data, int len);
 
@@ -45,5 +47,6 @@ int usbio_transfer(struct platform_device *pdev, u8 cmd, const void *obuf,
 		  int obuf_len, void *ibuf, int *ibuf_len);
 int usbio_transfer_noack(struct platform_device *pdev, u8 cmd, const void *obuf,
 			int obuf_len);
+bool is_gpio_hid_v1_0(const char *pnpid);
 
 #endif
