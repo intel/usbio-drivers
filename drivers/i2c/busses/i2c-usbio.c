@@ -400,13 +400,18 @@ static int usbio_i2c_probe(struct platform_device *pdev)
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
 static int usbio_i2c_remove(struct platform_device *pdev)
+#else
+static void usbio_i2c_remove(struct platform_device *pdev)
+#endif
 {
 	struct usbio_i2c_dev *usbio_i2c = platform_get_drvdata(pdev);
 
 	i2c_del_adapter(&usbio_i2c->adap);
-
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
 	return 0;
+#endif
 }
 
 static struct platform_driver usbio_i2c_driver = {
