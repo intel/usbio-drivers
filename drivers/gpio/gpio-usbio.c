@@ -17,6 +17,7 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/bitops.h>
+#include <linux/version.h>
 
 #define GPIO_PAYLOAD_LEN(packet, pin)	(sizeof(*packet))
 
@@ -489,9 +490,15 @@ static int usbio_gpio_probe(struct platform_device *pdev)
 	return devm_gpiochip_add_data(&pdev->dev, &usbio_gpio->gc, usbio_gpio);
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
 static int usbio_gpio_remove(struct platform_device *pdev)
+#else
+static void usbio_gpio_remove(struct platform_device *pdev)
+#endif
 {
-	return 0;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
+       return 0;
+#endif
 }
 
 static struct platform_driver usbio_gpio_driver = {
