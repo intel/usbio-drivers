@@ -16,6 +16,7 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/bitops.h>
+#include <linux/version.h>
 
 #define GPIO_PAYLOAD_LEN(packet, pin)	(sizeof(*packet))
 
@@ -474,10 +475,15 @@ static int usbio_gpio_probe(struct platform_device *pdev)
 #endif
 	return devm_gpiochip_add_data(&pdev->dev, &usbio_gpio->gc, usbio_gpio);
 }
-
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
 static int usbio_gpio_remove(struct platform_device *pdev)
+#else
+static void usbio_gpio_remove(struct platform_device *pdev)
+#endif
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
 	return 0;
+#endif
 }
 
 static struct platform_driver usbio_gpio_driver = {
@@ -490,6 +496,7 @@ module_platform_driver(usbio_gpio_driver);
 
 MODULE_AUTHOR("Zhang Lixu <lixu.zhang@intel.com>");
 MODULE_AUTHOR("Israel Cepeda <israel.a.cepeda.lopez@intel.com>");
+MODULE_AUTHOR("Lifu Wang <lifu.wang@intel.com>");
 MODULE_DESCRIPTION("Intel USBIO-GPIO driver");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:usb-gpio");
