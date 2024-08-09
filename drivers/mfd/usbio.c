@@ -27,7 +27,8 @@ char *gpio_hids[] = {
 	"INTC1074", /* TGL */
 	"INTC1096", /* ADL */
 	"INTC100B", /* RPL */
-	"INTC10D1", /* MTL */
+	"INTC10D1", /* MTL-CVF */
+	"INTC1007", /* MTL */
 	"INTC10B5", /* LNL */
 };
 static struct mfd_cell_acpi_match usbio_acpi_match_gpio;
@@ -36,7 +37,8 @@ static char *i2c_hids[] = {
 	"INTC1075", /* TGL */
 	"INTC1097", /* ADL */
 	"INTC100C", /* RPL */
-	"INTC10D2", /* MTL */
+	"INTC10D2", /* MTL-CVF */
+	"INTC1008", /* MTL */
 	"INTC10B6", /* LNL */
 };
 static struct mfd_cell_acpi_match usbio_acpi_match_i2cs;
@@ -121,7 +123,7 @@ static bool usbio_validate(void *data, u32 data_len)
 	return (header->len + sizeof(*header) == data_len);
 }
 
-void usbio_dump(struct usbio_dev *bridge, void *buf, int len)
+static void usbio_dump(struct usbio_dev *bridge, void *buf, int len)
 {
 	int i;
 	u8 tmp[256] = { 0 };
@@ -1177,5 +1179,6 @@ module_usb_driver(usbbridge_driver);
 MODULE_AUTHOR("Ye Xiang <xiang.ye@intel.com>");
 MODULE_AUTHOR("Zhang Lixu <lixu.zhang@intel.com>");
 MODULE_AUTHOR("Israel Cepeda <israel.a.cepeda.lopez@intel.com>");
+MODULE_AUTHOR("Lifu Wang <lifu.wang@intel.com>");
 MODULE_DESCRIPTION("Intel USBIO Bridge driver");
 MODULE_LICENSE("GPL v2");
