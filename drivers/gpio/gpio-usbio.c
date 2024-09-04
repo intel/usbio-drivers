@@ -497,7 +497,7 @@ static void usbio_gpio_remove(struct platform_device *pdev)
 #endif
 {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
-       return 0;
+	return 0;
 #endif
 }
 
@@ -511,6 +511,7 @@ module_platform_driver(usbio_gpio_driver);
 
 MODULE_AUTHOR("Zhang Lixu <lixu.zhang@intel.com>");
 MODULE_AUTHOR("Israel Cepeda <israel.a.cepeda.lopez@intel.com>");
+MODULE_AUTHOR("Lifu Wang <lifu.wang@intel.com>");
 MODULE_DESCRIPTION("Intel USBIO-GPIO driver");
 MODULE_LICENSE("GPL v2");
-MODULE_ALIAS("platform:usb-gpio");
+MODULE_ALIAS("platform:usbio-gpio");
