@@ -428,4 +428,4 @@ MODULE_AUTHOR("Israel Cepeda <israel.a.cepeda.lopez@intel.com>");
 MODULE_AUTHOR("Lifu Wang <lifu.wang@intel.com>");
 MODULE_DESCRIPTION("Intel USBIO-I2C driver");
 MODULE_LICENSE("GPL v2");
-MODULE_ALIAS("platform:usb-i2c");
+MODULE_ALIAS("platform:usbio-i2c");
