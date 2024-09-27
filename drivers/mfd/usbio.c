@@ -25,8 +25,8 @@ static char *gpio_hids[] = {
 	"INTC1096", /* ADL */
 	"INTC100B", /* RPL */
 	"INTC10D1", /* MTL-CVF */
-	"INTC1007", /* MTL */
 	"INTC10B5", /* LNL */
+	"INTC1007", /* MTL */
 };
 static struct mfd_cell_acpi_match usbio_acpi_match_gpio;
 
