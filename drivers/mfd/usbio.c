@@ -1159,6 +1159,7 @@ static const struct usb_device_id usbio_table[] = {
 	{USB_DEVICE(0x2AC1, 0x20C1)}, /* Lattice NX40 */
 	{USB_DEVICE(0x2AC1, 0x20C9)}, /* Lattice NX33 */
 	{USB_DEVICE(0x2AC1, 0x20CB)}, /* Lattice NX33U */
+	{USB_DEVICE(0x06CB, 0x0701)}, /* Synaptics */
 	{}
 };
 MODULE_DEVICE_TABLE(usb, usbio_table);
