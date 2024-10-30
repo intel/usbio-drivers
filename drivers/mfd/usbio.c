@@ -546,7 +546,7 @@ static int usbio_add_mfd_cell(struct usbio_dev *bridge, struct mfd_cell *cell)
 			 "The HID of cell %s does not exist in DSDT\n",
 			 cell->name);
 
-	new_cells = krealloc_array(bridge->cells, (bridge->cell_count + 1),
+	new_cells = (struct mfd_cell *)krealloc_array(bridge->cells, (bridge->cell_count + 1),
 				   sizeof(struct mfd_cell), GFP_KERNEL);
 	if (!new_cells)
 		return -ENOMEM;
