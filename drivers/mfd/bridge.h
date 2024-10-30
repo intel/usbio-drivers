@@ -99,7 +99,9 @@ struct usbio_gpio_descriptor {
 	struct usbio_bank_descriptor bank_desc[];
 } __packed;
 
-#define MAX_PACKET_SIZE 64
+//[WA]: Max USB packet size needs to be 63
+//in order for fw download to work
+#define MAX_PACKET_SIZE 63
 #define MAX_PAYLOAD_SIZE (MAX_PACKET_SIZE - sizeof(struct usbio_msg))
 #define MAX_PAYLOAD_BSIZE (MAX_PACKET_SIZE - sizeof(struct usbio_bmsg))
 #define USB_WRITE_TIMEOUT 200
