@@ -190,14 +190,14 @@ static int usbio_i2c_read(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr, u8 *da
 	return usbio_i2c_stop(usbio_i2c, slave_addr);
 }
 
-static int usbio_i2c_pure_write(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr, u8 *data, u8 len)
+static int usbio_i2c_pure_write(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr, u8 *data, u16 len)
 {
 	struct i2c_rw_packet *w_packet = (struct i2c_rw_packet *)usbio_i2c->obuf;
 	struct i2c_rw_packet *r_packet = (struct i2c_rw_packet *)usbio_i2c->ibuf;
 	int ret;
 	int ibuf_len;
 
-	if (len > USBIO_I2C_MAX_XFER_SIZE)
+	if (len > (u16)USBIO_I2C_MAX_XFER_SIZE)
 		return -EINVAL;
 
 	memset(w_packet, 0, sizeof(*w_packet));
@@ -227,7 +227,7 @@ static int usbio_i2c_pure_write(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr, 
 }
 
 static int usbio_i2c_write(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr,
-			  u8 *data, u8 len)
+			  u8 *data, u16 len)
 {
 	int ret;
 
