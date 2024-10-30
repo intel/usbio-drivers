@@ -235,15 +235,13 @@ static int usbio_control_xfer(struct usbio_stub *stub, u8 cmd, const void *obuf,
 	ret = usb_control_msg_send(bridge->udev, bridge->ep0, 0,
 			USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_DIR_OUT, 0, 0,
 			header, actual, timeout, GFP_KERNEL);
-	if (ret) {
+	if (ret)
 		dev_err(&bridge->intf->dev,
 			"bridge write failed ret:%d total_len:%d\n ", ret,
 			actual);
-		goto error;
-	}
 
 	kfree(header);
-	if (wait_ack) {
+	if (!ret && wait_ack) {
 		actual = bridge->cbuf_len;
 		header = kmalloc(actual, GFP_KERNEL);
 		if (!header) {
@@ -254,23 +252,21 @@ static int usbio_control_xfer(struct usbio_stub *stub, u8 cmd, const void *obuf,
 		ret = usb_control_msg_recv(bridge->udev, bridge->ep0, 0,
 			USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_DIR_IN, 0, 0,
 			header, actual, timeout, GFP_KERNEL);
-		if (ret) {
+		if (ret)
 			dev_err(&bridge->intf->dev,
 				"bridge read failed ret:%d total_len:%d\n ",
 				ret, actual);
-			goto error;
-		}
 	}
 
 	if (ibuf_len && header) {
 		*ibuf_len = header->len;
 		memcpy(ibuf, header->data, *ibuf_len);
+		kfree(header);
 	}
 
 	stub->ipacket.ibuf = NULL;
 	stub->ipacket.ibuf_len = 0;
 error:
-	kfree(header);
 	usb_autopm_put_interface(bridge->intf);
 	mutex_unlock(&bridge->mutex);
 	return ret;
