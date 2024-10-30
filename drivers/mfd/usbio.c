@@ -20,6 +20,22 @@
 
 #include "bridge.h"
 
+
+enum i2c_cmd {
+	I2C_DEINIT,
+	I2C_INIT,
+	I2C_READ,
+	I2C_WRITE,
+	I2C_XFER
+};
+
+struct i2c_rw_packet {
+	u8 id;
+	u16 config;
+	u16 len;
+	u8 data[];
+} __packed;
+
 static char *gpio_hids[] = {
 	"INTC1074", /* TGL */
 	"INTC1096", /* ADL */
@@ -273,13 +289,13 @@ error:
 }
 
 static int usbio_bulk_write(struct usbio_stub *stub, u8 cmd, const void *obuf,
-			   int obuf_len, void *ibuf, int *ibuf_len,
+			   int obuf_len, void *ibuf, int *ibuf_len, bool last_pkt,
 			   bool wait_ack, int timeout)
 {
 	struct usbio_bmsg *header;
 	struct usbio_dev *bridge = usb_get_intfdata(stub->intf);
 	int ret;
-	u8 flags = CMPL_FLAG;
+	u8 flags = 0;
 	int actual;
 
 	if (bridge->state == BRIDGE_STOPPED)
@@ -287,6 +303,9 @@ static int usbio_bulk_write(struct usbio_stub *stub, u8 cmd, const void *obuf,
 
 	if (obuf_len > MAX_PAYLOAD_SIZE)
 		return -EINVAL;
+
+	if (last_pkt)
+		flags |= CMPL_FLAG;
 
 	if (wait_ack)
 		flags |= ACK_FLAG;
@@ -354,9 +373,10 @@ static int usbio_transfer_internal(struct platform_device *pdev, u8 cmd,
 	struct usbio_platform_data *usbio_pdata;
 	struct usbio_dev *bridge;
 	struct usbio_stub *stub;
+	int ret = -EINVAL;
 
 	if (!pdev)
-		return -EINVAL;
+		return ret;
 
 	bridge = dev_get_drvdata(pdev->dev.parent);
 	usbio_pdata = dev_get_platdata(&pdev->dev);
@@ -365,12 +385,38 @@ static int usbio_transfer_internal(struct platform_device *pdev, u8 cmd,
 		return PTR_ERR(stub);
 
 	if (stub->type <= GPIO_STUB)
-		return usbio_control_xfer(stub, cmd, obuf, obuf_len,
+		ret = usbio_control_xfer(stub, cmd, obuf, obuf_len,
 			ibuf, ibuf_len,	wait_ack, USB_WRITE_ACK_TIMEOUT);
-	else
-		return usbio_bulk_write(stub, cmd, obuf, obuf_len,
-			ibuf, ibuf_len,	wait_ack, USB_WRITE_ACK_TIMEOUT);
+	else if (stub->type == I2C_STUB) {
+		if (cmd == I2C_WRITE) {
+			u8 *i2cpkt = obuf;
+			int wsize = 0;
+			bool done = false;
+			while (wsize < obuf_len) {
+				int chunk;
+
+				if ((obuf_len - wsize) <= MAX_PAYLOAD_BSIZE) {
+					chunk = obuf_len - wsize;
+					done = true;
+				} else
+					chunk = MAX_PAYLOAD_BSIZE;
+
+				ret = usbio_bulk_write(stub, cmd, i2cpkt, chunk, ibuf, ibuf_len,
+						done, done? wait_ack : false, USB_WRITE_ACK_TIMEOUT);
+				if (ret || done)
+					break;
+
+				wsize += chunk - sizeof(struct i2c_rw_packet);
+				i2cpkt += chunk - sizeof(struct i2c_rw_packet);
+				memcpy(i2cpkt, obuf, sizeof(struct i2c_rw_packet));
+			}
+		} else
+			ret = usbio_bulk_write(stub, cmd, obuf, obuf_len,
+					ibuf, ibuf_len,	true, wait_ack, USB_WRITE_ACK_TIMEOUT);
 	}
+
+	return ret;
+}
 
 int usbio_transfer(struct platform_device *pdev, u8 cmd, const void *obuf,
 		  int obuf_len, void *ibuf, int *ibuf_len)

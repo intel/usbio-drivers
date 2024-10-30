@@ -101,6 +101,7 @@ struct usbio_gpio_descriptor {
 
 #define MAX_PACKET_SIZE 64
 #define MAX_PAYLOAD_SIZE (MAX_PACKET_SIZE - sizeof(struct usbio_msg))
+#define MAX_PAYLOAD_BSIZE (MAX_PACKET_SIZE - sizeof(struct usbio_bmsg))
 #define USB_WRITE_TIMEOUT 200
 #define USB_WRITE_ACK_TIMEOUT 500
 #define USB_ENUM_STUB_TIMEOUT 20
