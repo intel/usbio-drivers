@@ -214,13 +214,22 @@ static int usbio_i2c_pure_write(struct usbio_i2c_dev *usbio_i2c, u8 slave_addr, 
 	if (ret || ibuf_len < sizeof(*r_packet))
 		return -EIO;
 
-	if ((s16)le16_to_cpu(r_packet->len) != len ||
-	    r_packet->id != w_packet->id) {
-		dev_err(&usbio_i2c->adap.dev,
-			"i2c write failed len:%d id:%d/%d\n",
-			(s16)le16_to_cpu(r_packet->len), r_packet->id,
-			w_packet->id);
-		return -EIO;
+	//[WA]:Avoid checking for read packet len in the case
+	//when packet size is more than 64 as chunking will
+	//happen. Since, i2c header is updated with payload
+	//bytes, and ACK is only enabled for last part of the
+	//chunk, the read packet len is some bytes < 64, but
+	//this not true since the original len is 256, in the
+	//case of i2c.
+	if (len < 64) {
+		if ((s16)le16_to_cpu(r_packet->len) != len ||
+	    		r_packet->id != w_packet->id) {
+			dev_err(&usbio_i2c->adap.dev,
+				"i2c write failed len:%d id:%d/%d\n",
+				(s16)le16_to_cpu(r_packet->len), r_packet->id,
+				w_packet->id);
+			return -EIO;
+		}
 	}
 
 	return 0;
