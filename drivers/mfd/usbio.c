@@ -37,8 +37,8 @@ struct i2c_rw_packet {
 } __packed;
 
 
-#define GPIO_V1_0_START_IDX 4
-#define GPIO_V1_0_END_IDX 4
+#define GPIO_V1_0_START_IDX 5
+#define GPIO_V1_0_END_IDX 5
 
 char *gpio_hids[] = {
 	"INTC1074", /* TGL */
