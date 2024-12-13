@@ -4,6 +4,9 @@
 obj-m += usbio.o
 usbio-y := drivers/usb/misc/usbio.o
 
+obj-m += gpio-usbio.o
+gpio-usbio-y := drivers/gpio/gpio-usbio.o
+
 KERNELRELEASE := $(shell uname -r)
 KDIR := /lib/modules/$(KERNELRELEASE)/build
 PWD := $(shell pwd)

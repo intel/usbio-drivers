@@ -8,6 +8,8 @@
 
 #include "usbio.h"
 
+static struct usbio_device *iobridge;
+
 static int usbio_control_msg(struct usbio_device *bridge,
 		struct usbio_packet_header *pkt, const void *obuf,
 		u16 obuf_len, void *ibuf, u16 ibuf_len)
@@ -227,11 +229,69 @@ static int usbio_ctrl_enumspis(struct usbio_device *bridge)
 	return ret;
 }
 
+int usbio_gpio_handler(u8 cmd, const void *obuf, u16 obuf_len,
+		void *ibuf, u16 ibuf_len)
+{
+	struct usbio_packet_header pkt = {
+		USBIO_PKTTYPE_GPIO,
+		cmd,
+		ibuf_len ? USBIO_PKTFLAGS_REQRESP : USBIO_PKTFLAG_CMP
+	};
+	int ret;
+
+	if (!iobridge)
+		return -ENODEV;
+
+	mutex_lock(&iobridge->mutex);
+	ret = usbio_control_msg(iobridge, &pkt, obuf, obuf_len, ibuf, ibuf_len);
+	if (ret > 0)
+		ret -= obuf_len;
+	mutex_unlock(&iobridge->mutex);
+
+	return ret;
+}
+
+int usbio_gpio_init(struct ioext_gpio_bank *banks, unsigned int len)
+{
+	struct usbio_gpio_bank_desc *gpio;
+	int i;
+
+	if (!banks || !len)
+		return -EINVAL;
+
+	if (!iobridge)
+		return -ENODEV;
+
+	gpio = iobridge->gpios;
+	for (i = 0; i < len && i < iobridge->nr_gpio_banks; i++)
+		banks[i].bitmap = gpio[i].bmap;
+
+	return iobridge->nr_gpio_banks;
+}
+EXPORT_SYMBOL_NS_GPL(usbio_gpio_init, USBIO);
+
+int usbio_transfer(u8 type, u8 cmd, const void *obuf, u16 obuf_len,
+		void *ibuf, u16 ibuf_len)
+{
+	int ret = -EINVAL;
+
+	switch (type) {
+	case IOEXT_GPIO:
+		if (IOEXT_GPIOCMD_VALID(cmd))
+			ret = usbio_gpio_handler(cmd, obuf, obuf_len, ibuf, ibuf_len);
+		break;
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_NS_GPL(usbio_transfer, USBIO);
+
 static void usbio_disconnect(struct usb_interface *intf)
 {
 	struct device *dev = &intf->dev;
 	struct usbio_device *bridge = usb_get_intfdata(intf);
 
+	iobridge = NULL;
 	usb_set_intfdata(intf, NULL);
 	usb_put_intf(intf);
 
@@ -239,6 +299,7 @@ static void usbio_disconnect(struct usb_interface *intf)
 	kfree(bridge->txbuf);
 	kfree(bridge->rxbuf);
 
+	mutex_destroy(&bridge->mutex);
 	devm_kfree(dev, bridge);
 }
 
@@ -258,6 +319,7 @@ static int usbio_probe(struct usb_interface *intf,
 	bridge->dev = dev;
 	bridge->udev = udev;
 	bridge->intf = usb_get_intf(intf);
+	mutex_init(&bridge->mutex);
 	usb_set_intfdata(intf, bridge);
 
 	bridge->ctrl_pipe = usb_endpoint_num(&udev->ep0.desc);
@@ -321,6 +383,7 @@ static int usbio_probe(struct usb_interface *intf,
 	bridge->nr_gpio_banks = usbio_ctrl_enumgpios(bridge);
 	bridge->nr_i2c_buses = usbio_ctrl_enumi2cs(bridge);
 	bridge->nr_spi_buses = usbio_ctrl_enumspis(bridge);
+	iobridge = bridge;
 
 	return 0;
 
