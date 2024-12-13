@@ -26,21 +26,21 @@ A dkms.conf is provided to build and install the driver stack
 
 * Prepare dkms:
 ```
-$sudo mkdir /usr/src/usbio-0.1
-$sudo cp -R . /usr/src/usbio-0.1/
+$sudo mkdir /usr/src/usbio-0.2
+$sudo cp -R . /usr/src/usbio-0.2/
 ```
 * Build and install dkms
 ```
-$sudo dkms add -m usbio -v 0.1
-$sudo dkms build -m usbio -v 0.1
-$sudo dkms install -m usbio -v 0.1
+$sudo dkms add -m usbio -v 0.2
+$sudo dkms build -m usbio -v 0.2
+$sudo dkms install -m usbio -v 0.2
 ```
 
 ### Kernel source code
 Tested on kernel 6.8, 6.11 and 6.14
 
-* Copy driver into kernel source code
-* Update the required Kconfig and Makefile
+* Copy drivers into kernel source code
+* Update the required Kconfigs and Makefiles
 
 Add to drivers/usb/misc/Kconfig
 ```
@@ -64,9 +64,29 @@ Add to drivers/usb/misc/Makefile
 obj-$(CONFIG_USB_USBIO)	+= usbio.o
 ```
 
-Enable driver in .config
+Add to drivers/gpio/Kconfig
+```
+config GPIO_USBIO
+	tristate "Intel USBIO GPIO support"
+	depends on USB_USBIO
+	default USB_USBIO
+	help
+	  Select this option to enable GPIO driver for the INTEL
+	  USBIO driver stack.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called gpio_usbio.
+```
+
+Add to drivers/gpio/Makefile
+```
+obj-$(CONFIG_GPIO_USBIO)	+= gpio-usbio.o
+```
+
+Enable drivers in .config
 ```
 CONFIG_USB_USBIO=y
+CONFIG_GPIO_USBIO=y
 ```
 
 * Compile and install new kernel
