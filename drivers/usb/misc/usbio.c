@@ -95,6 +95,106 @@ static int usbio_control_msg(struct usbio_device *bridge,
 	return ret;
 }
 
+static void usbio_bulk_recv(struct urb *urb)
+{
+	struct usbio_bulk_packet *bpkt = urb->transfer_buffer;
+	struct usbio_device *bridge = urb->context;
+
+	if (!urb->status) {
+		if (bpkt->header.flags & USBIO_PKTFLAGS_ISRSP) {
+			bridge->rxdat_len = urb->actual_length;
+			complete(&bridge->done);
+		}
+	} else
+		dev_err(bridge->dev, "URB error:%d", urb->status);
+
+	usb_submit_urb(bridge->urb, GFP_ATOMIC);
+}
+
+static int usbio_bulk_msg(struct usbio_device *bridge,
+		struct usbio_packet_header *pkt, const void *obuf,
+		u16 obuf_len, void *ibuf, u16 ibuf_len, int timeout)
+{
+	struct usbio_bulk_packet *bpkt;
+	u16 bpkt_len = sizeof(*bpkt) + obuf_len;
+	int ret, act;
+
+	if (!bridge || !pkt || (!obuf && obuf_len) || (!ibuf && ibuf_len))
+		return -EINVAL;
+
+	if (bpkt_len > bridge->txbuf_len) {
+		dev_err(bridge->dev, "Packet size error: %u > %u",
+				bpkt_len, bridge->txbuf_len);
+		return -EMSGSIZE;
+	}
+
+	/* Prepare Bulk Packet Header */
+	bpkt = (struct usbio_bulk_packet *)bridge->txbuf;
+	bpkt->header.type = pkt->type;
+	bpkt->header.cmd = pkt->cmd;
+	bpkt->header.flags = pkt->flags;
+	bpkt->len = obuf_len;
+
+	/* Copy the data */
+	memcpy(bpkt->data, obuf, obuf_len);
+
+	reinit_completion(&bridge->done);
+	ret = usb_bulk_msg(bridge->udev, bridge->tx_pipe,
+						(void *)bpkt, bpkt_len, &act, timeout);
+	dev_dbg(bridge->dev, "usb bulk sent: %u", act);
+	dev_dbg(bridge->dev, "\thdr: %*phN data: %*phN", (int)sizeof(*bpkt), bpkt,
+				(int)bpkt->len, bpkt->data);
+
+	if (ret || act != bpkt_len)
+		return -EIO;
+
+	if (pkt->flags & USBIO_PKTFLAG_ACK) {
+		bpkt_len = sizeof(*bpkt) + ibuf_len;
+
+		if (bpkt_len > bridge->txbuf_len) {
+			dev_err(bridge->dev, "Packet size error: %u > %u",
+					bpkt_len, bridge->txbuf_len);
+			return -EMSGSIZE;
+		}
+
+		ret = wait_for_completion_timeout(&bridge->done, timeout);
+		if (!ret)
+			return -ETIMEDOUT;
+
+		act = bridge->rxdat_len;
+		bpkt = (struct usbio_bulk_packet *)bridge->rxbuf;
+		dev_dbg(bridge->dev, "usb bulk received: %u", act);
+		dev_dbg(bridge->dev, "\thdr: %*phN data: %*phN", (int)sizeof(*bpkt),
+				bpkt, (int)bpkt->len, bpkt->data);
+
+		if (act < sizeof(*bpkt))
+			return -EIO;
+
+		ret = -EINVAL;
+		if ((bpkt->header.type == pkt->type) &&
+				(bpkt->header.cmd == pkt->cmd) &&
+				(bpkt->header.flags & USBIO_PKTFLAGS_ISRSP)) {
+			ret = -ENODEV;
+			if (!(bpkt->header.flags & USBIO_PKTFLAG_ERR)) {
+				if (ibuf_len < bpkt->len)
+					return -ENOBUFS;
+				/* Copy the data */
+				memcpy(ibuf, bpkt->data, bpkt->len);
+				ret = bpkt->len;
+			} else
+				dev_err(bridge->dev,
+						"Packet error type: %u, cmd: %u, flags: %u",
+						bpkt->header.type, bpkt->header.cmd,
+						bpkt->header.flags);
+		} else
+			dev_err(bridge->dev, "Unexpected reply type: %u, cmd: %u",
+					bpkt->header.type, bpkt->header.cmd);
+	} else
+		ret = bpkt_len - sizeof(*bpkt);
+
+	return ret;
+}
+
 static int usbio_ctrl_protver(struct usbio_device *bridge)
 {
 	struct usbio_packet_header pkt = {
@@ -251,6 +351,49 @@ int usbio_gpio_handler(u8 cmd, const void *obuf, u16 obuf_len,
 	return ret;
 }
 
+int usbio_i2c_handler(u8 cmd, const void *obuf, u16 obuf_len,
+		void *ibuf, u16 ibuf_len)
+{
+	const struct ioext_i2c_init *init = obuf;
+	struct usbio_packet_header pkt = {
+		USBIO_PKTTYPE_I2C,
+		cmd,
+		ibuf_len ? USBIO_PKTFLAGS_REQRESP : USBIO_PKTFLAG_CMP
+	};
+	int ret;
+
+	if (!iobridge)
+		return -ENODEV;
+
+	if (!iobridge->tx_pipe || !iobridge->rx_pipe)
+		return -ENXIO;
+
+	if (!init || init->busid > iobridge->nr_i2c_buses)
+		return -EINVAL;
+
+	if (cmd == IOEXT_I2CCMD_INIT) {
+		struct usbio_i2c_bus_desc *i2c = &iobridge->i2cs[init->busid];
+		unsigned int mode = i2c->caps & USBIO_I2C_BUS_MODE_CAP_MASK;
+		uint32_t max_speed = usbio_i2c_speeds[mode];
+
+		if (init->speed > max_speed) {
+			u32 *speed = (u32 *)&init->speed;
+
+			dev_warn(iobridge->dev,
+						"Invalid speed %u, adjusting to bus max %u",
+						*speed, max_speed);
+			*speed = max_speed;
+		}
+	}
+
+	mutex_lock(&iobridge->mutex);
+	ret = usbio_bulk_msg(iobridge, &pkt, obuf, obuf_len,
+						ibuf, ibuf_len, USBIO_BULKXFER_TIMEOUT);
+	mutex_unlock(&iobridge->mutex);
+
+	return ret;
+}
+
 int usbio_gpio_init(struct ioext_gpio_bank *banks, unsigned int len)
 {
 	struct usbio_gpio_bank_desc *gpio;
@@ -280,11 +423,31 @@ int usbio_transfer(u8 type, u8 cmd, const void *obuf, u16 obuf_len,
 		if (IOEXT_GPIOCMD_VALID(cmd))
 			ret = usbio_gpio_handler(cmd, obuf, obuf_len, ibuf, ibuf_len);
 		break;
+	case IOEXT_I2C:
+		if (IOEXT_I2CCMD_VALID(cmd))
+			ret = usbio_i2c_handler(cmd, obuf, obuf_len, ibuf, ibuf_len);
+		break;
 	}
 
 	return ret;
 }
 EXPORT_SYMBOL_NS_GPL(usbio_transfer, USBIO);
+
+static int usbio_suspend(struct usb_interface *intf, pm_message_t msg)
+{
+	struct usbio_device *bridge = usb_get_intfdata(intf);
+
+	usb_kill_urb(bridge->urb);
+
+	return 0;
+}
+
+static int usbio_resume(struct usb_interface *intf)
+{
+	struct usbio_device *bridge = usb_get_intfdata(intf);
+
+	return usb_submit_urb(bridge->urb, GFP_KERNEL);
+}
 
 static void usbio_disconnect(struct usb_interface *intf)
 {
@@ -319,6 +482,7 @@ static int usbio_probe(struct usb_interface *intf,
 	bridge->dev = dev;
 	bridge->udev = udev;
 	bridge->intf = usb_get_intf(intf);
+	init_completion(&bridge->done);
 	mutex_init(&bridge->mutex);
 	usb_set_intfdata(intf, bridge);
 
@@ -360,6 +524,20 @@ static int usbio_probe(struct usb_interface *intf,
 		dev_dbg(dev, "ep_out: %#02x size: %u ep_in: %#02x size: %u",
 				ep_out->bEndpointAddress, bridge->txbuf_len,
 				ep_in->bEndpointAddress, bridge->rxbuf_len);
+
+		bridge->urb = usb_alloc_urb(0, GFP_KERNEL);
+		if (!bridge->urb) {
+			dev_err(dev, "Failed to allocate usb urb");
+			goto error;
+		}
+
+		usb_fill_bulk_urb(bridge->urb, udev, bridge->rx_pipe, bridge->rxbuf,
+				bridge->rxbuf_len, usbio_bulk_recv, bridge);
+		ret = usb_submit_urb(bridge->urb, GFP_KERNEL);
+		if (ret) {
+			dev_err(dev, "Failed to submit usb urb");
+			goto error;
+		}
 	} else
 		dev_warn(dev, "Couldn't find both bulk-in and bulk-out endpoints");
 
@@ -407,6 +585,8 @@ static struct usb_driver usbbridge_driver = {
 	.name = "usbio-bridge",
 	.probe = usbio_probe,
 	.disconnect = usbio_disconnect,
+	.suspend = usbio_suspend,
+	.resume = usbio_resume,
 	.id_table = usbio_table,
 	.supports_autosuspend = 1
 };

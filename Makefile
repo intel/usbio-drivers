@@ -7,6 +7,9 @@ usbio-y := drivers/usb/misc/usbio.o
 obj-m += gpio-usbio.o
 gpio-usbio-y := drivers/gpio/gpio-usbio.o
 
+obj-m += i2c-usbio.o
+i2c-usbio-y := drivers/i2c/busses/i2c-usbio.o
+
 KERNELRELEASE := $(shell uname -r)
 KDIR := /lib/modules/$(KERNELRELEASE)/build
 PWD := $(shell pwd)

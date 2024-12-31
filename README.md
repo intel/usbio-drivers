@@ -26,14 +26,14 @@ A dkms.conf is provided to build and install the driver stack
 
 * Prepare dkms:
 ```
-$sudo mkdir /usr/src/usbio-0.2
-$sudo cp -R . /usr/src/usbio-0.2/
+$sudo mkdir /usr/src/usbio-0.3
+$sudo cp -R . /usr/src/usbio-0.3/
 ```
 * Build and install dkms
 ```
-$sudo dkms add -m usbio -v 0.2
-$sudo dkms build -m usbio -v 0.2
-$sudo dkms install -m usbio -v 0.2
+$sudo dkms add -m usbio -v 0.3
+$sudo dkms build -m usbio -v 0.3
+$sudo dkms install -m usbio -v 0.3
 ```
 
 ### Kernel source code
@@ -81,10 +81,30 @@ Add to drivers/gpio/Makefile
 obj-$(CONFIG_GPIO_USBIO)	+= gpio-usbio.o
 ```
 
+Add to drivers/i2c/busses/Kconfig
+```
+config I2C_USBIO
+	tristate "Intel USBIO I2C Adapter support"
+	depends on USB_USBIO
+	default USB_USBIO
+	help
+	  Select this option to enable I2C driver for the INTEL
+	  USBIO driver stack.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called i2c_usbio.
+```
+
+Add to drivers/i2c/busses/Makefile
+```
+obj-$(CONFIG_I2C_USBIO)	+= i2c-usbio.o
+```
+
 Enable drivers in .config
 ```
 CONFIG_USB_USBIO=y
 CONFIG_GPIO_USBIO=y
+CONFIG_I2C_USBIO=y
 ```
 
 * Compile new kernel

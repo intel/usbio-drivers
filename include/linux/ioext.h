@@ -79,6 +79,42 @@ struct ioext_gpio_rw {
 	u32 value;
 } __packed;
 
+/* IOEXT I2C commands */
+enum ioext_i2c_cmd {
+	IOEXT_I2CCMD_UNINIT,
+	IOEXT_I2CCMD_INIT,
+	IOEXT_I2CCMD_READ,
+	IOEXT_I2CCMD_WRITE,
+	IOEXT_I2CCMD_END
+};
+
+#define IOEXT_I2CCMD_VALID(cmd) (IOEXT_I2CCMD_UNINIT <= cmd && \
+			cmd < IOEXT_I2CCMD_END)
+
+/************************
+ * IOEXT I2C Controller *
+ ************************/
+
+#define IOEXT_MAX_I2CBUSES 5
+
+struct ioext_i2c_uninit {
+	u8 busid;
+	u16 config;
+} __packed;
+
+struct ioext_i2c_init {
+	u8 busid;
+	u16 config;
+	u32 speed;
+} __packed;
+
+struct ioext_i2c_rw {
+	u8 busid;
+	u16 config;
+	u16 size;
+	u8 data[] __counted_by(size);
+} __packed;
+
 int usbio_gpio_init(struct ioext_gpio_bank *banks, unsigned int len);
 
 int usbio_transfer(u8 type, u8 cmd, const void *obuf,
