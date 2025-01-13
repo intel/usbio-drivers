@@ -229,7 +229,7 @@ static int usbio_control_xfer(struct usbio_stub *stub, u8 cmd, const void *obuf,
 		flags |= ACK_FLAG;
 
 	stub->ipacket.ibuf_len = 0;
-	actual = sizeof(header) + obuf_len;
+	actual = sizeof(*header) + obuf_len;
 	header = kmalloc(actual, GFP_KERNEL);
 	if (!header)
 		return -ENOMEM;
