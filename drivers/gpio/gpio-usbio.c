@@ -8,6 +8,7 @@
 #include <linux/platform_device.h>
 #include <linux/gpio/driver.h>
 #include <linux/ioext.h>
+#include <linux/version.h>
 
 struct usbio_gpio {
 	int gpio_banks;
@@ -223,7 +224,11 @@ static int usbio_gpio_probe(struct platform_device *pdev)
 	return gpiochip_add_data(&gpio->gc, gpio);
 }
 
+#if KERNEL_VERSION(6, 11, 0) > LINUX_VERSION_CODE
 static int usbio_gpio_remove(struct platform_device *pdev)
+#else
+static void usbio_gpio_remove(struct platform_device *pdev)
+#endif
 {
 	struct usbio_gpio *gpio = platform_get_drvdata(pdev);
 	struct device *dev = &pdev->dev;
@@ -233,7 +238,9 @@ static int usbio_gpio_remove(struct platform_device *pdev)
 	mutex_destroy(&gpio->mutex);
 	devm_kfree(dev, gpio);
 
+#if KERNEL_VERSION(6, 11, 0) > LINUX_VERSION_CODE
 	return 0;
+#endif
 }
 
 static const struct acpi_device_id usbio_gpio_acpi_match[] = {

@@ -8,6 +8,7 @@
 #include <linux/platform_device.h>
 #include <linux/i2c.h>
 #include <linux/ioext.h>
+#include <linux/version.h>
 
 struct usbio_i2c {
 	int id;
@@ -191,7 +192,11 @@ exit:
 	return 0;
 }
 
+#if KERNEL_VERSION(6, 11, 0) > LINUX_VERSION_CODE
 static int usbio_i2c_remove(struct platform_device *pdev)
+#else
+static void usbio_i2c_remove(struct platform_device *pdev)
+#endif
 {
 	struct usbio_i2c *i2c = platform_get_drvdata(pdev);
 	struct device *dev = &pdev->dev;
@@ -199,7 +204,9 @@ static int usbio_i2c_remove(struct platform_device *pdev)
 	i2c_del_adapter(&i2c->adap);
 	devm_kfree(dev, i2c);
 
+#if KERNEL_VERSION(6, 11, 0) > LINUX_VERSION_CODE
 	return 0;
+#endif
 }
 
 static const struct acpi_device_id usbio_i2c_acpi_match[] = {
