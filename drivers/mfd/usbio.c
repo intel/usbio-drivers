@@ -303,7 +303,7 @@ static int usbio_bulk_write(struct usbio_stub *stub, u8 cmd, const void *obuf,
 	if (bridge->state == BRIDGE_STOPPED)
 		return -ENODEV;
 
-	if (obuf_len > MAX_PAYLOAD_SIZE)
+	if (obuf_len > MAX_PAYLOAD_BSIZE)
 		return -EINVAL;
 
 	if (last_pkt)
