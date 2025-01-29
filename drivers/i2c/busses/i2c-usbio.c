@@ -65,7 +65,15 @@ struct i2c_xfer {
 	u8 data[];
 } __packed;
 
-#define USBIO_I2C_MAX_XFER_SIZE 256
+//[WA]: Max USB packet size needs to be 63
+//in order for fw download to work
+#define USBIO_MAX_PACKET_SIZE    63
+#define USBIO_BULK_MSG_HDR_SIZE   5
+
+#define USBIO_I2C_MAX_XFER_SIZE                            \
+	(USBIO_MAX_PACKET_SIZE - USBIO_BULK_MSG_HDR_SIZE - \
+	 sizeof(struct i2c_rw_packet))
+
 #define USBIO_I2C_BUF_SIZE                                                      \
 	(USBIO_I2C_MAX_XFER_SIZE + sizeof(struct i2c_rw_packet))
 
@@ -384,6 +392,7 @@ static int usbio_i2c_probe(struct platform_device *pdev)
 	usbio_i2c->adap.owner = THIS_MODULE;
 	usbio_i2c->adap.class = I2C_CLASS_HWMON;
 	usbio_i2c->adap.algo = &usbio_i2c_algo;
+	usbio_i2c->adap.quirks = &usbio_i2c_quirks;
 	usbio_i2c->adap.dev.parent = &pdev->dev;
 
 	try_bind_acpi(pdev, usbio_i2c);

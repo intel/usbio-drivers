@@ -390,37 +390,8 @@ static int usbio_transfer_internal(struct platform_device *pdev, u8 cmd,
 		ret = usbio_control_xfer(stub, cmd, obuf, obuf_len,
 			ibuf, ibuf_len,	wait_ack, USB_WRITE_ACK_TIMEOUT);
 	else if (stub->type == I2C_STUB) {
-		if (cmd == I2C_WRITE) {
-			u8 *i2cpkt = obuf;
-			int wsize = 0;
-			bool done = false;
-			while (wsize < obuf_len) {
-				int chunk;
-
-				if ((obuf_len - wsize) <= MAX_PAYLOAD_BSIZE) {
-					chunk = obuf_len - wsize;
-					done = true;
-				} else
-					chunk = MAX_PAYLOAD_BSIZE;
-
-				//[WA]: The I2C header in each chunk has to be updated
-				//to the payload bytes being sent in that chunk for fw
-				//download to work.
-				struct i2c_rw_packet *i2cpkt_hdr = (struct i2c_rw_packet *)i2cpkt;
-				i2cpkt_hdr->len = chunk - sizeof(struct i2c_rw_packet);
-				
-				ret = usbio_bulk_write(stub, cmd, i2cpkt, chunk, ibuf, ibuf_len,
-						done, done? wait_ack : false, USB_WRITE_ACK_TIMEOUT);
-				if (ret || done)
-					break;
-
-				wsize += chunk - sizeof(struct i2c_rw_packet);
-				i2cpkt += chunk - sizeof(struct i2c_rw_packet);
-				memcpy(i2cpkt, obuf, sizeof(struct i2c_rw_packet));
-			}
-		} else
-			ret = usbio_bulk_write(stub, cmd, obuf, obuf_len,
-					ibuf, ibuf_len,	true, wait_ack, USB_WRITE_ACK_TIMEOUT);
+		ret = usbio_bulk_write(stub, cmd, obuf, obuf_len,
+			ibuf, ibuf_len, true, wait_ack, USB_WRITE_ACK_TIMEOUT);
 	}
 
 	return ret;
