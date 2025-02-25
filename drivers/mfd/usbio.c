@@ -44,6 +44,7 @@ static char *gpio_hids[] = {
 	"INTC1007", /* MTL */
 	"INTC10B5", /* LNL */
 	"INTC10E2", /* PTL */
+	"INTC10B2", /* ARL */
 };
 static struct mfd_cell_acpi_match usbio_acpi_match_gpio;
 
@@ -55,6 +56,7 @@ static char *i2c_hids[] = {
 	"INTC1008", /* MTL */
 	"INTC10B6", /* LNL */
 	"INTC10E3", /* PTL */
+	"INTC10B3", /* ARL */
 };
 static struct mfd_cell_acpi_match usbio_acpi_match_i2cs;
 
