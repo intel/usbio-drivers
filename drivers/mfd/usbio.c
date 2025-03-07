@@ -36,7 +36,11 @@ struct i2c_rw_packet {
 	u8 data[];
 } __packed;
 
-static char *gpio_hids[] = {
+
+#define GPIO_V1_0_START_IDX 5
+#define GPIO_V1_0_END_IDX 5
+
+char *gpio_hids[] = {
 	"INTC1074", /* TGL */
 	"INTC1096", /* ADL */
 	"INTC100B", /* RPL */
@@ -45,6 +49,7 @@ static char *gpio_hids[] = {
 	"INTC10B5", /* LNL */
 	"INTC10E2", /* PTL */
 };
+
 static struct mfd_cell_acpi_match usbio_acpi_match_gpio;
 
 static char *i2c_hids[] = {
@@ -119,6 +124,17 @@ static int precheck_acpi_hid(struct usb_interface *intf)
 	return 0;
 }
 
+bool is_gpio_hid_v1_0(const char *pnpid)
+{
+	int i;
+
+	for (i = GPIO_V1_0_START_IDX; i <= GPIO_V1_0_END_IDX; i++) {
+		if (strcmp(pnpid, gpio_hids[i]) == 0)
+			return true;
+	}
+	return false;
+}
+EXPORT_SYMBOL_GPL(is_gpio_hid_v1_0);
 static bool usbio_validate(void *data, u32 data_len)
 {
 	struct usbio_bmsg *header = (struct usbio_bmsg *)data;
@@ -250,9 +266,16 @@ static int usbio_control_xfer(struct usbio_stub *stub, u8 cmd, const void *obuf,
 	stub->ipacket.ibuf = ibuf;
 	stub->acked = false;
 	usb_autopm_get_interface(bridge->intf);
-	ret = usb_control_msg_send(bridge->udev, bridge->ep0, 0,
+
+	if (stub->type ==  GPIO_STUB && is_gpio_hid_v1_0(bridge->cells->acpi_match->pnpid)) {
+		ret = usb_control_msg_send(bridge->udev, bridge->ep0, 0,
+			USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_DIR_OUT, 0, 0,
+			header, actual - 4, timeout, GFP_KERNEL);
+	} else {
+		ret = usb_control_msg_send(bridge->udev, bridge->ep0, 0,
 			USB_TYPE_VENDOR | USB_RECIP_DEVICE | USB_DIR_OUT, 0, 0,
 			header, actual, timeout, GFP_KERNEL);
+	}
 	if (ret)
 		dev_err(&bridge->intf->dev,
 			"bridge write failed ret:%d total_len:%d\n ", ret,
