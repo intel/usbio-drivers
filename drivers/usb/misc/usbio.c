@@ -112,7 +112,7 @@ static void usbio_bulk_recv(struct urb *urb)
 }
 
 static int usbio_bulk_msg(struct usbio_device *bridge,
-		struct usbio_packet_header *pkt, const void *obuf,
+		struct usbio_packet_header *pkt, bool last, const void *obuf,
 		u16 obuf_len, void *ibuf, u16 ibuf_len, int timeout)
 {
 	struct usbio_bulk_packet *bpkt;
@@ -128,11 +128,14 @@ static int usbio_bulk_msg(struct usbio_device *bridge,
 		return -EMSGSIZE;
 	}
 
+	if (!obuf_len)
+		goto read;
+
 	/* Prepare Bulk Packet Header */
 	bpkt = (struct usbio_bulk_packet *)bridge->txbuf;
 	bpkt->header.type = pkt->type;
 	bpkt->header.cmd = pkt->cmd;
-	bpkt->header.flags = pkt->flags;
+	bpkt->header.flags = last ? pkt->flags : 0;
 	bpkt->len = obuf_len;
 
 	/* Copy the data */
@@ -148,7 +151,8 @@ static int usbio_bulk_msg(struct usbio_device *bridge,
 	if (ret || act != bpkt_len)
 		return -EIO;
 
-	if (pkt->flags & USBIO_PKTFLAG_ACK) {
+read:
+	if (last && pkt->flags & USBIO_PKTFLAG_ACK) {
 		bpkt_len = sizeof(*bpkt) + ibuf_len;
 
 		if (bpkt_len > bridge->txbuf_len) {
@@ -351,6 +355,9 @@ int usbio_gpio_handler(u8 cmd, const void *obuf, u16 obuf_len,
 	return ret;
 }
 
+#define I2C_RW_OVERHEAD (sizeof(struct usbio_bulk_packet) + \
+			sizeof(struct ioext_i2c_rw))
+
 int usbio_i2c_handler(u8 cmd, const void *obuf, u16 obuf_len,
 		void *ibuf, u16 ibuf_len)
 {
@@ -371,7 +378,8 @@ int usbio_i2c_handler(u8 cmd, const void *obuf, u16 obuf_len,
 	if (!init || init->busid > iobridge->nr_i2c_buses)
 		return -EINVAL;
 
-	if (cmd == IOEXT_I2CCMD_INIT) {
+	switch (cmd) {
+	case IOEXT_I2CCMD_INIT:
 		struct usbio_i2c_bus_desc *i2c = &iobridge->i2cs[init->busid];
 		unsigned int mode = i2c->caps & USBIO_I2C_BUS_MODE_CAP_MASK;
 		uint32_t max_speed = usbio_i2c_speeds[mode];
@@ -384,10 +392,94 @@ int usbio_i2c_handler(u8 cmd, const void *obuf, u16 obuf_len,
 						*speed, max_speed);
 			*speed = max_speed;
 		}
+		break;
+
+	case IOEXT_I2CCMD_WRITE:
+		const struct ioext_i2c_rw *i2cwr = obuf;
+		u16 txchunk = iobridge->txbuf_len - I2C_RW_OVERHEAD;
+		u16 wsize = i2cwr->size;
+
+		if (wsize > txchunk) {
+			/* Need to split the output buffer */
+			struct ioext_i2c_rw *wr;
+			u16 len = 0;
+
+			wr = kzalloc(sizeof(*wr) + txchunk, GFP_KERNEL);
+			if (!wr) {
+				dev_err(iobridge->dev, "Failed to allocate i2c txchunk of %u",
+						(u16)sizeof(*wr) + txchunk);
+				return -ENOMEM;
+			}
+
+			memcpy(wr, i2cwr, sizeof(*wr));
+			mutex_lock(&iobridge->mutex);
+			do {
+				memcpy(wr->data, &i2cwr->data[len], txchunk);
+				len += txchunk;
+
+				ret = usbio_bulk_msg(iobridge, &pkt, wsize == len,
+										wr, sizeof(*wr) + txchunk, ibuf,
+										ibuf_len, USBIO_BULKXFER_TIMEOUT);
+				if (ret < 0)
+					break;
+
+				if (wsize - len < txchunk)
+					txchunk = wsize - len;
+			} while (wsize > len);
+			mutex_unlock(&iobridge->mutex);
+
+			kfree(wr);
+
+			return ret;
+		}
+		break;
+
+	case IOEXT_I2CCMD_READ:
+		struct ioext_i2c_rw *i2crd = ibuf;
+		u16 rxchunk = iobridge->rxbuf_len - I2C_RW_OVERHEAD;
+		u16 rsize = i2crd->size;
+
+		if (rsize > rxchunk) {
+			/* Need to split the input buffer */
+			struct ioext_i2c_rw *rd;
+			u16 len = 0;
+
+			rd = kzalloc(sizeof(*rd) + rxchunk, GFP_KERNEL);
+			if (!rd) {
+				dev_err(iobridge->dev, "Failed to allocate i2c rxchunk of %u",
+						(u16)sizeof(*rd) + rxchunk);
+				return -ENOMEM;
+			}
+
+			mutex_lock(&iobridge->mutex);
+			do {
+				if (rsize - len < rxchunk)
+					rxchunk = rsize - len;
+
+				ret = usbio_bulk_msg(iobridge, &pkt, true, obuf,
+									len == 0 ? obuf_len : 0, rd,
+									sizeof(*rd) + rxchunk,
+									USBIO_BULKXFER_TIMEOUT);
+				if (ret < 0)
+					break;
+
+				memcpy(&i2crd->data[len], rd->data, rxchunk);
+				len += rxchunk;
+			} while (rsize > len);
+			mutex_unlock(&iobridge->mutex);
+
+			if (rsize == len)
+				i2crd->size = rd->size;
+
+			kfree(rd);
+
+			return ret < 0 ? ret : sizeof(*i2crd) + i2crd->size;
+		}
+		break;
 	}
 
 	mutex_lock(&iobridge->mutex);
-	ret = usbio_bulk_msg(iobridge, &pkt, obuf, obuf_len,
+	ret = usbio_bulk_msg(iobridge, &pkt, true, obuf, obuf_len,
 						ibuf, ibuf_len, USBIO_BULKXFER_TIMEOUT);
 	mutex_unlock(&iobridge->mutex);
 
