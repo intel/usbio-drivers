@@ -231,4 +231,8 @@ module_platform_driver(usbio_i2c_driver);
 MODULE_DESCRIPTION("Intel USBIO I2C driver");
 MODULE_AUTHOR("Israel Cepeda <israel.a.cepeda.lopez@intel.com>");
 MODULE_LICENSE("GPL");
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,13,0)
+MODULE_IMPORT_NS("USBIO");
+#else
 MODULE_IMPORT_NS(USBIO);
+#endif

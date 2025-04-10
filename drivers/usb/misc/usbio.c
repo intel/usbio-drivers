@@ -7,6 +7,7 @@
  */
 
 #include "usbio.h"
+#include <linux/version.h>
 
 static struct usbio_device *iobridge;
 
@@ -411,7 +412,11 @@ int usbio_gpio_init(struct ioext_gpio_bank *banks, unsigned int len)
 
 	return iobridge->nr_gpio_banks;
 }
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,13,0)
+EXPORT_SYMBOL_NS_GPL(usbio_gpio_init, "USBIO");
+#else
 EXPORT_SYMBOL_NS_GPL(usbio_gpio_init, USBIO);
+#endif
 
 int usbio_transfer(u8 type, u8 cmd, const void *obuf, u16 obuf_len,
 		void *ibuf, u16 ibuf_len)
@@ -431,7 +436,11 @@ int usbio_transfer(u8 type, u8 cmd, const void *obuf, u16 obuf_len,
 
 	return ret;
 }
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,13,0)
+EXPORT_SYMBOL_NS_GPL(usbio_transfer, "USBIO");
+#else
 EXPORT_SYMBOL_NS_GPL(usbio_transfer, USBIO);
+#endif
 
 static int usbio_suspend(struct usb_interface *intf, pm_message_t msg)
 {
