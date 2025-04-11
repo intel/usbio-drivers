@@ -20,6 +20,7 @@
 #include <linux/types.h>
 #include <linux/usb.h>
 #include <linux/usbio.h>
+#include <linux/version.h>
 
 /*************************************
  * USBIO Bridge Protocol Definitions *
@@ -492,7 +493,11 @@ void usbio_client_acpi_bind(struct auxiliary_device *adev,
 	if (wd.adev)
 		ACPI_COMPANION_SET(dev, wd.adev);
 }
+#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
 EXPORT_SYMBOL_NS_GPL(usbio_client_acpi_bind, USBIO);
+#else
+EXPORT_SYMBOL_NS_GPL(usbio_client_acpi_bind, "USBIO");
+#endif
 
 static void usbio_auxdev_release(struct device *dev)
 {
@@ -812,7 +817,11 @@ int usbio_transfer(struct usbio_client *client, u8 cmd, const void *obuf,
 
 	return ret;
 }
+#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
 EXPORT_SYMBOL_NS_GPL(usbio_transfer, USBIO);
+#else
+EXPORT_SYMBOL_NS_GPL(usbio_transfer, "USBIO");
+#endif
 
 static ssize_t usbio_devinfo_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)

@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/usbio.h>
+#include <linux/version.h>
 
 /**
  * struct usbio_i2c - represents usbio i2c bus
@@ -231,4 +232,8 @@ module_auxiliary_driver(usbio_i2c_driver);
 MODULE_DESCRIPTION("Intel USBIO I2C driver");
 MODULE_AUTHOR("Israel Cepeda <israel.a.cepeda.lopez@intel.com>");
 MODULE_LICENSE("GPL");
+#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
 MODULE_IMPORT_NS(USBIO);
+#else
+MODULE_IMPORT_NS("USBIO");
+#endif
