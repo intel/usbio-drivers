@@ -415,6 +415,14 @@ int usbio_i2c_handler(u8 cmd, const void *obuf, u16 obuf_len,
 			memcpy(wr, i2cwr, sizeof(*wr));
 			mutex_lock(&iobridge->mutex);
 			do {
+				/* This quirk is needed to support older CV
+				 * FW to upgrade to the newer FW that has this
+				 * issue fixed. Older CV FW seems to treat this
+				 * size as chunk payload on the usb bridge
+				 * rather than the full payload sent by the
+				 * host app to usbio driver. */
+				wr->size = txchunk;
+
 				memcpy(wr->data, &i2cwr->data[len], txchunk);
 				len += txchunk;
 
@@ -428,6 +436,13 @@ int usbio_i2c_handler(u8 cmd, const void *obuf, u16 obuf_len,
 					txchunk = wsize - len;
 			} while (wsize > len);
 			mutex_unlock(&iobridge->mutex);
+
+			/* This quirk is needed to support the above quirk
+			 * since the number of bytes sent to device in total
+			 * is modified by the above quirk due to FW issue,
+			 * so this change will report the total bytes sent
+			 * to the device. */
+			((struct ioext_i2c_rw *)ibuf)->size = wsize;
 
 			kfree(wr);
 
@@ -605,7 +620,13 @@ static int usbio_probe(struct usb_interface *intf,
 	if (!ret) {
 		ret = -ENOMEM;
 		bridge->tx_pipe = usb_sndbulkpipe(udev, usb_endpoint_num(ep_out));
-		bridge->txbuf_len = usb_endpoint_maxp(ep_out);
+
+		/* This quirk is needed to support FW update as CV FW does not
+		 * seem to receive data available interrupt if a payload of max
+		 * packet size is sent to it. Reducing by a byte fixes the
+		 * issue. Applying this to both read and write endpoints. */
+		bridge->txbuf_len = usb_endpoint_maxp(ep_out) - 1;
+
 		bridge->txbuf = kzalloc(bridge->txbuf_len, GFP_KERNEL);
 		if (!bridge->txbuf) {
 			dev_err(dev, "Failed to allocate txbuf of %u",
@@ -614,7 +635,10 @@ static int usbio_probe(struct usb_interface *intf,
 		}
 
 		bridge->rx_pipe = usb_rcvbulkpipe(udev, usb_endpoint_num(ep_in));
-		bridge->rxbuf_len = usb_endpoint_maxp(ep_in);
+
+		/* Quirk as mentioned above */
+		bridge->rxbuf_len = usb_endpoint_maxp(ep_in) - 1;
+
 		bridge->rxbuf = kzalloc(bridge->rxbuf_len, GFP_KERNEL);
 		if (!bridge->rxbuf) {
 			dev_err(dev, "Failed to allocate rxbuf of %u",
