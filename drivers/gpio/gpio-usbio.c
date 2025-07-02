@@ -128,31 +128,55 @@ static int usbio_gpio_get(struct gpio_chip *gc, unsigned int offset)
 
 	return ret;
 }
-
+#if LINUX_VERSION_CODE >=  KERNEL_VERSION(6, 17, 0)
+static int usbio_gpio_set(struct gpio_chip *gc, unsigned int offset,
+		int value)
+#else
 static void usbio_gpio_set(struct gpio_chip *gc, unsigned int offset,
 		int value)
+#endif
 {
 	struct usbio_gpio *gpio = gpiochip_get_data(gc);
 	struct ioext_gpio_bank *bank;
 	struct ioext_gpio_rw gbuf;
 	int pin;
-
-	if (!gpio || (offset >= gc->ngpio))
+#if LINUX_VERSION_CODE >=  KERNEL_VERSION(6, 17, 0)
+	int ret;
+#endif
+	if (!gpio || (offset >= gc->ngpio)) {
+#if LINUX_VERSION_CODE >=  KERNEL_VERSION(6, 17, 0)
+		return -EINVAL;
+#else
 		return;
-
+#endif
+	}
 	bank = &gpio->banks[offset / IOEXT_GPIOSPERBANK];
 	pin = offset % IOEXT_GPIOSPERBANK;
-	if (~bank->bitmap & BIT(pin))
+	if (~bank->bitmap & BIT(pin)) {
+#if LINUX_VERSION_CODE >=  KERNEL_VERSION(6, 17, 0)
+		return -EINVAL;
+#else
 		return;
-
+#endif
+	}
 	mutex_lock(&gpio->mutex);
 	gbuf.bankid = offset / IOEXT_GPIOSPERBANK;
 	gbuf.pincount  = 1;
 	gbuf.pin = pin;
 	gbuf.value = value << pin;
+#if LINUX_VERSION_CODE >=  KERNEL_VERSION(6, 17, 0)
+	ret = usbio_transfer(IOEXT_GPIO, IOEXT_GPIOCMD_WRITE,
+					&gbuf, sizeof(gbuf), NULL, 0);
+#else
 	usbio_transfer(IOEXT_GPIO, IOEXT_GPIOCMD_WRITE,
 					&gbuf, sizeof(gbuf), NULL, 0);
+#endif
+
 	mutex_unlock(&gpio->mutex);
+#if LINUX_VERSION_CODE >=  KERNEL_VERSION(6, 17, 0)
+	return ret;
+#endif
+
 }
 
 static int usbio_gpio_set_config(struct gpio_chip *gc, unsigned int offset,
