@@ -175,8 +175,13 @@ static int usbio_gpio_get_value(struct gpio_chip *chip, unsigned int offset)
 	return usbio_gpio_read(usbio_gpio, offset);
 }
 
-static void usbio_gpio_set_value(struct gpio_chip *chip, unsigned int offset,
-				int val)
+static
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 17, 0)
+void
+#else
+int
+#endif
+usbio_gpio_set_value(struct gpio_chip *chip, unsigned int offset, int val)
 {
 	struct usbio_gpio_dev *usbio_gpio = gpiochip_get_data(chip);
 	int ret;
@@ -186,6 +191,10 @@ static void usbio_gpio_set_value(struct gpio_chip *chip, unsigned int offset,
 		dev_err(chip->parent,
 			"%s offset:%d val:%d set value failed %d\n", __func__,
 			offset, val, ret);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
+	return ret;
+#endif
 }
 
 static int usbio_gpio_direction_input(struct gpio_chip *chip,
