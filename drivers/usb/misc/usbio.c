@@ -116,6 +116,49 @@ struct usbio_dev_info {
 	struct usbio_fwver fwver;
 };
 
+/**********************************
+ *      USBIO Firmware Quirks     *
+ **********************************/
+#define USBIO_FWQUIRK_BULKSIZE	BIT(0)	/* Overwrite bulk size */
+#define USBIO_FWQUIRK_NOTASYNC	BIT(1)	/* Sequential ctrl and bulk xfers */
+#define USBIO_FWQUIRK_GPIOMAP	BIT(8)	/* Ignore FW GPIO Map */
+#define USBIO_FWQUIRK_I2CNIACK	BIT(16)	/* I2C No Init ACK */
+#define USBIO_FWQUIRK_I2CCHUNK	BIT(17)	/* Use I2C chunk transfers size */
+#define USBIO_FWQUIRK_I2CADAPT	BIT(18)	/* Use FW specific adapter quirk */
+
+struct usbio_fw_quirks {
+	u32 quirks;
+	u16 bulk_size;
+	const struct i2c_adapter_quirks *i2c_quirks;
+};
+
+/* Lattice NX40 FW quirks */
+static struct usbio_fw_quirks lat_nx40_quirks = {
+	.quirks = USBIO_FWQUIRK_BULKSIZE | USBIO_FWQUIRK_I2CCHUNK,
+	.bulk_size = 62
+};
+
+/* Lattice NX33(U) I2C quirks */
+static const struct i2c_adapter_quirks lat_nx33_i2c_quirks = {
+	.flags = I2C_AQ_NO_REP_START,
+	.max_read_len = 52,
+	.max_write_len = 52
+};
+
+/* Lattice NX33 FW quirks */
+static struct usbio_fw_quirks lat_nx33_quirks = {
+	.quirks = USBIO_FWQUIRK_GPIOMAP | USBIO_FWQUIRK_BULKSIZE |
+		  USBIO_FWQUIRK_I2CCHUNK | USBIO_FWQUIRK_I2CADAPT,
+	.bulk_size = 62,
+	.i2c_quirks = &lat_nx33_i2c_quirks
+};
+
+/* Synaptics Sabre FW quirks */
+static struct usbio_fw_quirks syn_sabre_quirks = {
+	.quirks = USBIO_FWQUIRK_BULKSIZE | USBIO_FWQUIRK_I2CCHUNK,
+	.bulk_size = 63
+};
+
 /**
  * struct usbio_device - the usb device exposing IOs
  *
@@ -144,6 +187,7 @@ struct usbio_dev_info {
  * @nr_i2c_buses: the number of i2c buses
  * @i2cs: the i2c buses array
  * @i2cbus: the usbio i2c bus data
+ * @fw_quirks: the usbio firmware quirks
  */
 struct usbio_device {
 	struct device *dev;
@@ -169,8 +213,10 @@ struct usbio_device {
 	struct mutex ctllock;
 
 	struct completion done;
-	/* Bulk transfer concurrency lock */
+	/* Async Bulk transfer concurrency lock */
 	struct mutex blklock;
+	/* Bulk transfer concurrency lock */
+	struct mutex *lock;
 
 	struct list_head cli_list;
 
@@ -181,6 +227,8 @@ struct usbio_device {
 	unsigned int nr_i2c_buses;
 	struct usbio_i2c_bus_desc i2cs[USBIO_MAX_I2CBUSES];
 	struct usbio_i2c_bus *i2cbus;
+
+	struct usbio_fw_quirks *fw_quirks;
 };
 
 /**
@@ -585,7 +633,11 @@ static int usbio_ctrl_enumgpios(struct usbio_device *usbio)
 
 	usbio->chip->nbanks = usbio->nr_gpio_banks;
 	for (int i = 0; i < usbio->chip->nbanks; i++)
-		usbio->chip->banks[i].bitmap = gpio[i].bmap;
+		if (usbio->fw_quirks &&
+		    usbio->fw_quirks->quirks & USBIO_FWQUIRK_GPIOMAP)
+			usbio->chip->banks[i].bitmap = ~0U;
+		else
+			usbio->chip->banks[i].bitmap = gpio[i].bmap;
 
 	usbio_add_client(usbio, USBIO_GPIO_CLIENT, USBIO_GPIO, 0, usbio->chip);
 
@@ -631,6 +683,10 @@ static int usbio_ctrl_enumi2cs(struct usbio_device *usbio)
 		bus->id = i2c[i].id;
 		bus->speed = usbio_i2c_speeds[i2c[i].caps &
 					 USBIO_I2C_BUS_MODE_CAP_MASK];
+		if (usbio->fw_quirks &&
+		    usbio->fw_quirks->quirks & USBIO_FWQUIRK_I2CADAPT)
+			bus->quirks = usbio->fw_quirks->i2c_quirks;
+
 		usbio_add_client(usbio, USBIO_I2C_CLIENT,
 				 USBIO_I2C, bus->id, bus);
 	}
@@ -687,6 +743,13 @@ static int usbio_i2c_handler(struct usbio_device *usbio, u8 cmd,
 	u16 len = 0;
 
 	switch (cmd) {
+	case USBIO_I2CCMD_INIT:
+		if (usbio->fw_quirks &&
+		    usbio->fw_quirks->quirks & USBIO_FWQUIRK_I2CNIACK)
+			/* No ACK for I2C Init */
+			pkt.flags = USBIO_PKTFLAG_CMP;
+
+		break;
 	case USBIO_I2CCMD_WRITE:
 		const struct usbio_i2c_rw *i2cwr = obuf;
 		u16 txchunk = usbio->txbuf_len - I2C_RW_OVERHEAD;
@@ -707,8 +770,12 @@ static int usbio_i2c_handler(struct usbio_device *usbio, u8 cmd,
 
 		/* Copy the header */
 		memcpy(wr, i2cwr, sizeof(*wr));
-		mutex_lock(&usbio->blklock);
+		mutex_lock(usbio->lock);
 		do {
+			if (usbio->fw_quirks &&
+			    usbio->fw_quirks->quirks & USBIO_FWQUIRK_I2CCHUNK)
+				wr->size = txchunk;
+
 			/* Copy the data chunk */
 			memcpy(wr->data, &i2cwr->data[len], txchunk);
 			len += txchunk;
@@ -725,7 +792,11 @@ static int usbio_i2c_handler(struct usbio_device *usbio, u8 cmd,
 			if (wsize - len < txchunk)
 				txchunk = wsize - len;
 		} while (wsize > len);
-		mutex_unlock(&usbio->blklock);
+		mutex_unlock(usbio->lock);
+
+		if (usbio->fw_quirks &&
+		    usbio->fw_quirks->quirks & USBIO_FWQUIRK_I2CCHUNK)
+			((struct usbio_i2c_rw *)ibuf)->size = len;
 
 		kfree(wr);
 
@@ -749,7 +820,7 @@ static int usbio_i2c_handler(struct usbio_device *usbio, u8 cmd,
 		if (!rd)
 			return -ENOMEM;
 
-		mutex_lock(&usbio->blklock);
+		mutex_lock(usbio->lock);
 		do {
 			if (rsize - len < rxchunk)
 				rxchunk = rsize - len;
@@ -767,7 +838,7 @@ static int usbio_i2c_handler(struct usbio_device *usbio, u8 cmd,
 			memcpy(&i2crd->data[len], rd->data, rxchunk);
 			len += rxchunk;
 		} while (rsize > len);
-		mutex_unlock(&usbio->blklock);
+		mutex_unlock(usbio->lock);
 
 		if (rsize == len)
 			i2crd->size = rd->size;
@@ -777,10 +848,10 @@ static int usbio_i2c_handler(struct usbio_device *usbio, u8 cmd,
 		return ret < 0 ? ret : sizeof(*i2crd) + i2crd->size;
 	}
 
-	mutex_lock(&usbio->blklock);
+	mutex_lock(usbio->lock);
 	ret = usbio_bulk_msg(usbio, &pkt, true, obuf, obuf_len,
 			     ibuf, ibuf_len, timeout);
-	mutex_unlock(&usbio->blklock);
+	mutex_unlock(usbio->lock);
 
 	return ret;
 }
@@ -854,6 +925,12 @@ static ssize_t usbio_devinfo_show(struct device *dev,
 	for (i = 0; i < usbio->nr_i2c_buses; i++) {
 		len += sysfs_emit_at(buf, len, "\tBus%u caps: %#02x\n",
 				     i2c[i].id, i2c[i].caps);
+	}
+
+	/* FW Quirks */
+	if (usbio->fw_quirks) {
+		len += sysfs_emit_at(buf, len, "FW Quirks: %#04x\n",
+				     usbio->fw_quirks->quirks);
 	}
 
 	return len;
@@ -935,8 +1012,22 @@ static int usbio_probe(struct usb_interface *intf,
 
 	mutex_init(&usbio->ctllock);
 	mutex_init(&usbio->blklock);
+	usbio->lock = &usbio->blklock;
 	init_completion(&usbio->done);
 	INIT_LIST_HEAD(&usbio->cli_list);
+	if (id->driver_info) {
+		/* Get firmware quirks */
+		usbio->fw_quirks = (struct usbio_fw_quirks *)id->driver_info;
+
+		/* USBIO is designed to work using control and bulk transfers
+		 * asynchronously. Unfortunately there are some devices that
+		 * can't handle it. Hence the need to use the same mutex to
+		 * avoid concurrency issues
+		 */
+		if (usbio->fw_quirks->quirks & USBIO_FWQUIRK_NOTASYNC)
+			/* Use control transfer mutex */
+			usbio->lock = &usbio->ctllock;
+	}
 
 	usbio->ctrl_pipe = usb_endpoint_num(&udev->ep0.desc);
 	usbio->ctrlbuf_len = usb_maxpacket(udev, usbio->ctrl_pipe);
@@ -966,6 +1057,13 @@ static int usbio_probe(struct usb_interface *intf,
 	usbio->urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!usbio->urb)
 		goto error;
+
+	if (usbio->fw_quirks &&
+	    usbio->fw_quirks->quirks & USBIO_FWQUIRK_BULKSIZE) {
+		/* Use the bulk size from the quirks */
+		usbio->rxbuf_len = usbio->fw_quirks->bulk_size;
+		usbio->txbuf_len = usbio->fw_quirks->bulk_size;
+	}
 
 	usb_fill_bulk_urb(usbio->urb, udev, usbio->rxpipe,
 			  usbio->rxbuf, usbio->rxbuf_len,
@@ -1016,10 +1114,14 @@ error:
 }
 
 static const struct usb_device_id usbio_table[] = {
-	{ USB_DEVICE(0x2AC1, 0x20C1) }, /* Lattice NX40 */
-	{ USB_DEVICE(0x2AC1, 0x20C9) }, /* Lattice NX33 */
-	{ USB_DEVICE(0x2AC1, 0x20CB) }, /* Lattice NX33U */
-	{ USB_DEVICE(0x06CB, 0x0701) }, /* Synaptics Sabre */
+	{ USB_DEVICE(0x2AC1, 0x20C1),  /* Lattice NX40 */
+		.driver_info = (unsigned long)&lat_nx40_quirks },
+	{ USB_DEVICE(0x2AC1, 0x20C9), /* Lattice NX33 */
+		.driver_info = (unsigned long)&lat_nx33_quirks },
+	{ USB_DEVICE(0x2AC1, 0x20CB) , /* Lattice NX33U */
+		.driver_info = (unsigned long)&lat_nx33_quirks },
+	{ USB_DEVICE(0x06CB, 0x0701), /* Synaptics Sabre */
+		.driver_info = (unsigned long)&syn_sabre_quirks },
 	{ }
 };
 MODULE_DEVICE_TABLE(usb, usbio_table);

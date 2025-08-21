@@ -8,6 +8,7 @@
 #define _LINUX_USBIO_H_
 
 #include <linux/auxiliary_bus.h>
+#include <linux/i2c.h>
 #include <linux/types.h>
 
 #define auxiliary_get_usbio_client(auxdev) \
@@ -137,6 +138,7 @@ static inline bool usbio_i2ccmd_valid(u8 cmd)
 struct usbio_i2c_bus {
 	u8 id;
 	u32 speed;
+	const struct i2c_adapter_quirks *quirks;
 } __packed;
 
 struct usbio_i2c_uninit {

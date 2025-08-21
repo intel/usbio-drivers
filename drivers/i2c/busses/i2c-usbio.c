@@ -186,6 +186,9 @@ static int usbio_i2c_probe(struct auxiliary_device *adev,
 	i2c->adap.dev.parent = dev;
 	i2c->adap.algo = &usbio_i2c_algo;
 	i2c->adap.quirks = &usbio_i2c_quirks;
+	if (i2c->bus->quirks)
+		/* Use USBIO bus specific quirks */
+		i2c->adap.quirks = i2c->bus->quirks;
 
 	device_set_node(&i2c->adap.dev, dev_fwnode(dev));
 	snprintf(i2c->adap.name, sizeof(i2c->adap.name),
