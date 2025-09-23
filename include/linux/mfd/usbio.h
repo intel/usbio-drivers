@@ -45,5 +45,8 @@ int usbio_transfer(struct platform_device *pdev, u8 cmd, const void *obuf,
 		  int obuf_len, void *ibuf, int *ibuf_len);
 int usbio_transfer_noack(struct platform_device *pdev, u8 cmd, const void *obuf,
 			int obuf_len);
+int usbio_register_event_cb(struct platform_device *pdev,
+			    usbio_event_cb_t event_cb);
+void usbio_unregister_event_cb(struct platform_device *pdev);
 
 #endif
