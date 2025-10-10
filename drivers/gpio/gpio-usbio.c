@@ -115,8 +115,13 @@ static int usbio_gpio_get(struct gpio_chip *gc, unsigned int offset)
 	return ret == sizeof(gbuf.value) ? (gbuf.value >> pin) & 1 : -EINVAL;
 }
 
+#if KERNEL_VERSION(6, 17, 0) > LINUX_VERSION_CODE
 static void usbio_gpio_set(struct gpio_chip *gc, unsigned int offset,
 			   int value)
+#else
+static int usbio_gpio_set(struct gpio_chip *gc, unsigned int offset,
+			  int value)
+#endif
 {
 	struct usbio_gpio *gpio = gpiochip_get_data(gc);
 	struct usbio_gpio_bank *bank;
@@ -125,14 +130,23 @@ static void usbio_gpio_set(struct gpio_chip *gc, unsigned int offset,
 
 	pin = usbio_gpio_val_bank_and_pin(gc, offset, &bank);
 	if (pin < 0)
+#if KERNEL_VERSION(6, 17, 0) > LINUX_VERSION_CODE
 		return;
+#else
+		return -EINVAL;
+#endif
 
 	gbuf.bankid = offset / USBIO_GPIOSPERBANK;
 	gbuf.pincount  = 1;
 	gbuf.pin = pin;
 	gbuf.value = value << pin;
+#if KERNEL_VERSION(6, 17, 0) > LINUX_VERSION_CODE
 	usbio_transfer(gpio->client, USBIO_GPIOCMD_WRITE, &gbuf,
 		       sizeof(gbuf), NULL, 0);
+#else
+	return usbio_transfer(gpio->client, USBIO_GPIOCMD_WRITE, &gbuf,
+			      sizeof(gbuf), NULL, 0);
+#endif
 }
 
 static int usbio_gpio_direction_output(struct gpio_chip *gc,
@@ -159,9 +173,13 @@ static int usbio_gpio_direction_output(struct gpio_chip *gc,
 	if (ret)
 		return ret;
 
+#if KERNEL_VERSION(6, 17, 0) > LINUX_VERSION_CODE
 	usbio_gpio_set(gc, offset, value);
 
 	return 0;
+#else
+	return usbio_gpio_set(gc, offset, value);
+#endif
 }
 
 static int usbio_gpio_set_config(struct gpio_chip *gc, unsigned int offset,

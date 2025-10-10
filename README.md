@@ -37,7 +37,7 @@ $sudo dkms install -m usbio -v 0.3
 ```
 
 ### Kernel source code
-Tested on kernel 6.8, 6.11 and 6.14
+Tested on kernel 6.8, 6.11, 6.14 and 6.17
 
 * Copy drivers into kernel source code
 * Update the required Kconfigs and Makefiles
