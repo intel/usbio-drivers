@@ -145,7 +145,7 @@ static void usbio_gpio_set(struct gpio_chip *gc, unsigned int offset,
 #endif
 	if (!gpio || (offset >= gc->ngpio)) {
 #if LINUX_VERSION_CODE >=  KERNEL_VERSION(6, 17, 0)
-		return -EINVAL;
+		return 0;
 #else
 		return;
 #endif
@@ -154,7 +154,7 @@ static void usbio_gpio_set(struct gpio_chip *gc, unsigned int offset,
 	pin = offset % IOEXT_GPIOSPERBANK;
 	if (~bank->bitmap & BIT(pin)) {
 #if LINUX_VERSION_CODE >=  KERNEL_VERSION(6, 17, 0)
-		return -EINVAL;
+		return 0;
 #else
 		return;
 #endif
