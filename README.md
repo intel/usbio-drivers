@@ -8,7 +8,7 @@ This repository supports USBIO drivers on Intel's Meteor Lake, Arrow Lake, Lunar
 * Kernel source code
 
 ### Kernel Module
-Requires 6.8 (or later) kernel's headers installed
+Requires 6.8, 6.11, 6.14, 6.17 (or later) kernel's headers installed
 
 * To compile:
 ```
