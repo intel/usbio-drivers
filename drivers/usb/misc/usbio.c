@@ -147,8 +147,9 @@ static const struct i2c_adapter_quirks lat_nx33_i2c_quirks = {
 
 /* Lattice NX33 FW quirks */
 static struct usbio_fw_quirks lat_nx33_quirks = {
-	.quirks = USBIO_FWQUIRK_GPIOMAP | USBIO_FWQUIRK_BULKSIZE |
-		  USBIO_FWQUIRK_I2CCHUNK | USBIO_FWQUIRK_I2CADAPT,
+	.quirks = USBIO_FWQUIRK_GPIOMAP | USBIO_FWQUIRK_BULKSIZE  |
+		  USBIO_FWQUIRK_I2CCHUNK | USBIO_FWQUIRK_I2CADAPT |
+		  USBIO_FWQUIRK_I2CNIACK,
 	.bulk_size = 62,
 	.i2c_quirks = &lat_nx33_i2c_quirks
 };
