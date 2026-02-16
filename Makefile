@@ -10,8 +10,11 @@ gpio-usbio-y := drivers/gpio/gpio-usbio.o
 obj-m += i2c-usbio.o
 i2c-usbio-y := drivers/i2c/busses/i2c-usbio.o
 
-KERNELRELEASE := $(shell uname -r)
-KDIR := /lib/modules/$(KERNELRELEASE)/build
+KERNELRELEASE ?= $(shell uname -r)
+KDIR ?= /lib/modules/$(KERNELRELEASE)/build
+ifdef KERNELDIR
+KDIR := $(KERNELDIR)
+endif
 PWD := $(shell pwd)
 
 ccflags-y += -I$(src)/include/
